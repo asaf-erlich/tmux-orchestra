@@ -16,4 +16,4 @@ Features planned
 ## Done (moved out of FUTURE)
 
 - Per-provider throbbers (claude, braille, opencode) — implemented via `@ab_spinner` and `orchestra set-state --spinner <name>`.
-- Progress bar rendering — `render_progress` in [lib/render.sh](../lib/render.sh) draws `@ab_progress` + `@ab_progress_label` in the meta row.
+- Progress bar rendering — `progress_bar` (awk) in [lib/render.sh](../lib/render.sh) draws `@ab_progress` + `@ab_progress_label` in the meta row.

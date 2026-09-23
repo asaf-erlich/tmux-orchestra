@@ -10,7 +10,7 @@ ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 mouse_y=$1
 session_name=$2
 
-# Each window block rendered by render_window_block is exactly 3 lines tall
+# Each window block rendered by window_block (lib/render.sh) is exactly 3 lines tall
 # (top border, detail row, meta row).
 block=$((mouse_y / 3))
 

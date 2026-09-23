@@ -18,6 +18,7 @@ bin/
   orchestra-select      Move/confirm the sidebar keyboard selection
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
+  select.sh             Sidebar keyboard selection (orchestra-select + key reader)
   render.sh             Pure rendering (boxes, glyphs, progress, ANSI)
   notify.sh             Platform notifier dispatch (Linux/macOS/WSL)
 hooks/
@@ -66,7 +67,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 | `@ab_width` | orchestra-toggle | 8 chars | Session-scoped: cached pane width |
 | `@ab_sidebar_pane_id` | orchestra-toggle | — | Session-scoped: sidebar pane ID |
 | `@ab_sidebar_pid` | orchestra-toggle | — | Session-scoped: renderer PID |
-| `@ab_selected_window` | orchestra-select | — | Session-scoped: sidebar keyboard selection (window_id); unset = active window |
+| `@ab_selected_window` | lib/select.sh | — | Session-scoped: sidebar keyboard selection (window_id); unset = active window |
 
 `set_opt` / `clear_opt` / `get_opt` in [lib/common.sh](lib/common.sh) are the only correct way to read/write these options. They enforce truncation and prefix namespacing. Do not call `tmux set-option` directly for `@ab_*` options.
 
@@ -89,8 +90,8 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 
 ## Renderer (bin/orchestra-render and lib/render.sh)
 
-- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux list-windows -F '...'`), then calls `render_rows` (pure function in [lib/render.sh](lib/render.sh)).
-- Do not add tmux calls inside `render_rows` or any function it calls — rendering must remain pure.
+- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-windows -F '...'`), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
+- Do not add tmux calls inside `render_rows`/`render_frame` or the awk program — rendering must remain pure.
 - The pipe-delimited format read from tmux is:
   `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color`
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
@@ -150,7 +151,7 @@ The items in [spec/FUTURE.md](spec/FUTURE.md) are explicitly deferred. Do not im
 | Task | Where to look |
 |---|---|
 | Add a new CLI subcommand | `bin/orchestra` — add `cmd_<name>()` and a `case` branch |
-| Change rendering layout | [lib/render.sh](lib/render.sh) — `render_window_block` and `render_rows` |
+| Change rendering layout | [lib/render.sh](lib/render.sh) — awk `window_block`, `render_rows`, `render_frame` |
 | Add a platform notifier | [lib/notify.sh](lib/notify.sh) — extend `orchestra_notify_dispatch` |
 | Change default config/keys | [orchestra.tmux](orchestra.tmux) — top-level option and bind-key calls |
 | Add a new harness template | `hooks/<name>/` — template files + README |

@@ -6,56 +6,30 @@
 # @ab_selected_window so it survives window reordering. An unset or stale
 # value means "the active window". up/down move it (clamped at the ends)
 # without switching windows; enter runs select-window on it, the same effect
-# as a click; reset clears it.
+# as a click; reset clears it. The sidebar's key reader does not run this: it
+# sources lib/select.sh directly.
 set -eu
 
 ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 # shellcheck disable=SC1091
-. "$ORCHESTRA_LIB/common.sh"
+. "$ORCHESTRA_LIB/select.sh"
 
-[ $# -eq 2 ] || ab_usage 'usage: orchestra-select <up|down|enter|reset> <session>'
-action=$1
-session=$2
-
-nudge_renderer() {
-    pid=$(get_session_opt "$session" '@ab_sidebar_pid')
-    if [ -n "$pid" ]; then
-        kill -USR1 "$pid" 2>/dev/null || true
-    fi
+usage() {
+    printf '%s\n' "$1" >&2
+    exit 1
 }
 
-case "$action" in
-    reset)
-        clear_session_opt "$session" '@ab_selected_window' || true
-        nudge_renderer
-        exit 0
-        ;;
-    up | down | enter) ;;
-    *) ab_usage "unknown action: $action" ;;
+[ $# -eq 2 ] || usage 'usage: orchestra-select <up|down|enter|reset> <session>'
+session=$2
+
+case "$1" in
+    reset) select_reset "$session" ;;
+    up) select_move "$session" -1 || exit 0 ;;
+    down) select_move "$session" 1 || exit 0 ;;
+    enter) select_move "$session" 0 enter || exit 0 ;;
+    *) usage "unknown action: $1" ;;
 esac
 
-windows=$(tmux list-windows -t "$session" -F '#{window_id} #{window_active}' 2>/dev/null) || exit 0
-[ -n "$windows" ] || exit 0
-selected=$(get_session_opt "$session" '@ab_selected_window')
-
-# Resolve the current selection, falling back to the active window, then step.
-# (Not named "target": the common.sh option helpers overwrite that global.)
-pick=$(printf '%s\n' "$windows" | awk -v sel="$selected" -v action="$action" '
-    { id[NR] = $1; if ($2 == "1") active = NR; if ($1 == sel) cur = NR }
-    END {
-        if (!cur) cur = active
-        if (!cur) cur = 1
-        if (action == "up" && cur > 1) cur--
-        if (action == "down" && cur < NR) cur++
-        print id[cur]
-    }
-')
-[ -n "$pick" ] || exit 0
-
-if [ "$action" = 'enter' ]; then
-    clear_session_opt "$session" '@ab_selected_window' || true
-    tmux select-window -t "$pick" >/dev/null 2>&1 || true
-else
-    set_session_opt "$session" '@ab_selected_window' "$pick" || true
+if [ -n "$SELECT_SIDEBAR_PID" ]; then
+    kill -USR1 "$SELECT_SIDEBAR_PID" 2>/dev/null || true
 fi
-nudge_renderer
