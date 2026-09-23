@@ -112,6 +112,28 @@ orchestra-click 999 orchestra-tests
 active_unchanged=$(tmux display-message -p -t orchestra-tests '#{window_id}')
 assert_eq "$window_id" "$active_unchanged" 'orchestra-click out-of-range is a no-op'
 
+# Keyboard selection: orchestra-select moves @ab_selected_window without
+# switching windows, clamps at both ends, and enter selects it.
+window3_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+tmux select-window -t "$window_id"
+orchestra-select up orchestra-tests
+assert_eq "$window_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection starts on the active window and clamps at the top'
+orchestra-select down orchestra-tests
+orchestra-select down orchestra-tests
+orchestra-select down orchestra-tests
+assert_eq "$window3_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection moves down and clamps at the bottom'
+assert_eq "$window_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'moving the selection does not switch windows'
+orchestra-select enter orchestra-tests
+assert_eq "$window3_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'enter selects the highlighted window'
+assert_eq '' "$(tmux show-options -v -t orchestra-tests @ab_selected_window 2>/dev/null || printf '')" 'enter clears the selection'
+tmux set-option -q -t orchestra-tests @ab_selected_window '@999'
+orchestra-select up orchestra-tests
+assert_eq "$window2_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'a stale selection falls back to the active window'
+orchestra-select reset orchestra-tests
+assert_eq '' "$(tmux show-options -v -t orchestra-tests @ab_selected_window 2>/dev/null || printf '')" 'reset clears the selection'
+tmux kill-window -t "$window3_id"
+tmux select-window -t "$window_id"
+
 # A stale ORCHESTRA_WINDOW_ID must not override the pane the command is
 # actually running in.
 TMUX_PANE="$pane2_id" ORCHESTRA_WINDOW_ID="$window_id" orchestra set-state running --action 'pane wins'

@@ -19,7 +19,7 @@ redraw() {
         ''|*[!0-9]*) width=32 ;;
     esac
 
-    if tmux_line_dump=$(tmux list-windows -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}' 2>/dev/null); then
+    if tmux_line_dump=$(tmux list-windows -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@ab_selected_window}|#{&&:#{window_active},#{==:#{pane_id},#{@ab_sidebar_pane_id}}}' 2>/dev/null); then
         :
     else
         tmux_line_dump=''
@@ -27,21 +27,85 @@ redraw() {
 
     nerd_fonts=$(tmux show-options -gvq @orchestra_nerd_fonts 2>/dev/null || printf 'off')
     wait_color=$(tmux show-options -gvq @orchestra_wait_color 2>/dev/null || printf '#d29922')
+    # Field 18 is @ab_selected_window (same on every line), field 19 is 1 on
+    # the active window when its active pane is the sidebar, i.e. the sidebar
+    # has focus. Show the selection while focused, falling back to the active
+    # window when the stored id is unset or stale. Unfocused, show it only if
+    # it points somewhere other than the active window (mouse wheel).
+    selected=$(printf '%s\n' "$tmux_line_dump" | awk -F'|' '
+        $2 != "" { sel = $18; if ($4 == "1") active = $2; if ($2 == sel) valid = 1; if ($19 == "1") focused = 1 }
+        END {
+            if (valid) { if (focused || sel != active) print sel }
+            else if (focused) print active
+        }
+    ')
+
     printf '\033[H'
-    printf '%s\n' "$tmux_line_dump" | render_rows "$width" "${FRAME_INDEX:-0}" "$nerd_fonts" "$wait_color"
+    printf '%s\n' "$tmux_line_dump" | render_rows "$width" "${FRAME_INDEX:-0}" "$nerd_fonts" "$wait_color" "$selected"
     printf '\033[J'
 }
 
-# The sidebar never reads stdin, but tmux still delivers keys to it (the wheel
-# arrives as cursor keys once the alternate screen is active). Without this the
-# tty echoes them and the cursor walks off on its own.
+# Keyboard selection. A background reader blocks on the tty (no work while
+# idle) and hands each key to orchestra-select, which updates
+# @ab_selected_window and nudges this process with SIGUSR1. The mouse wheel
+# arrives as cursor keys once the alternate screen is active, so it moves the
+# selection too.
+handle_keys() {
+    renderer_pid=$1
+    while :; do
+        # min 1 time 0: dd returns as soon as one keypress (or one burst, such
+        # as an escape sequence) is available.
+        hex=$(dd bs=64 count=1 2>/dev/null | od -An -v -tx1) || break
+        [ -n "$hex" ] || break
+        kill -0 "$renderer_pid" 2>/dev/null || break
+        session=$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_id}' 2>/dev/null) || continue
+        [ -n "$session" ] || continue
+
+        # shellcheck disable=SC2086
+        set -- $hex
+        while [ $# -gt 0 ]; do
+            action=''
+            case "$1" in
+                1b)
+                    if [ $# -ge 3 ] && { [ "$2" = 5b ] || [ "$2" = 4f ]; }; then
+                        case "$3" in
+                            41) action=up ;;
+                            42) action=down ;;
+                        esac
+                        shift 2
+                    fi
+                    ;;
+                6b) action=up ;;
+                6a) action=down ;;
+                0d | 0a) action=enter ;;
+            esac
+            shift
+            [ -z "$action" ] || "$BIN_DIR/orchestra-select" "$action" "$session" || true
+        done
+    done
+}
+
+BIN_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# The reader nudges us with SIGUSR1 right after a key; do not let one that
+# lands before the first sleep_interruptible kill the renderer.
+trap ':' USR1
 stty_saved=''
+reader_pid=''
 if [ -t 0 ]; then
     stty_saved=$(stty -g 2>/dev/null) || stty_saved=''
-    stty -echo 2>/dev/null || true
+    # -echo also stops unhandled keys from walking the cursor around.
+    stty -echo -icanon min 1 time 0 2>/dev/null || true
+    # Asynchronous lists get stdin from /dev/null unless redirected explicitly.
+    exec 3<&0
+    handle_keys "$$" <&3 &
+    reader_pid=$!
+    exec 3<&-
 fi
 
 restore() {
+    if [ -n "$reader_pid" ]; then
+        kill "$reader_pid" 2>/dev/null || true
+    fi
     printf '\033[?25h\033[?1049l'
     if [ -n "$stty_saved" ]; then
         stty "$stty_saved" 2>/dev/null || true

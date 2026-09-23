@@ -51,3 +51,11 @@ bind-key -n MouseDown1Pane \
 ```
 
 `bin/orchestra-click` maps a Y coordinate to a window block and runs `tmux select-window`. Each window block rendered by `render_window_block` is exactly 3 lines tall (top border, detail row, meta row), so `block_index = mouse_y / 3`. The script picks the Nth window returned by `tmux list-windows -t <session>` — so the click-to-window mapping is tied to the renderer's row height. If `render_window_block` ever changes its line count, update [bin/orchestra-click](../bin/orchestra-click) to match.
+
+## Keyboard selection
+
+With the sidebar pane focused, Up/Down (also `k`/`j`, and the mouse wheel, which tmux delivers as cursor keys in the alternate screen) move a selection across the window blocks without switching windows; Enter runs `select-window` on it, the same effect as a click. No root-table bindings are involved: `orchestra-render` puts the tty in `-icanon -echo min 1 time 0` and starts a background reader that blocks in `dd` on the pane's stdin (no work while idle), decodes `ESC [ A`/`ESC [ B` (and `ESC O A/B`), `k`, `j`, CR/LF, and calls `bin/orchestra-select <up|down|enter> <session>`. The reader is killed and the tty restored in the renderer's EXIT trap.
+
+`orchestra-select` stores the selection as a window_id in the session option `@ab_selected_window` (so it survives reordering), clamps at both ends, and sends SIGUSR1 to the renderer. An unset or stale value means the active window. Enter and every `pane-focus-in` clear it, so the selection starts on the active window whenever the sidebar gains focus.
+
+The renderer shows the selection while the sidebar has focus, and when unfocused only if it points away from the active window (wheel scrolling). A selected block has `▌` as the left edge of all three lines and a reverse-video title, distinct from the heavy-bordered active window.

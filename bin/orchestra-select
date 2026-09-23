@@ -1,0 +1,61 @@
+#!/bin/sh
+# Keyboard selection in the sidebar.
+# Usage: orchestra-select <up|down|enter|reset> <session>
+#
+# The selection is stored as a window_id in the session option
+# @ab_selected_window so it survives window reordering. An unset or stale
+# value means "the active window". up/down move it (clamped at the ends)
+# without switching windows; enter runs select-window on it, the same effect
+# as a click; reset clears it.
+set -eu
+
+ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
+# shellcheck disable=SC1091
+. "$ORCHESTRA_LIB/common.sh"
+
+[ $# -eq 2 ] || ab_usage 'usage: orchestra-select <up|down|enter|reset> <session>'
+action=$1
+session=$2
+
+nudge_renderer() {
+    pid=$(get_session_opt "$session" '@ab_sidebar_pid')
+    if [ -n "$pid" ]; then
+        kill -USR1 "$pid" 2>/dev/null || true
+    fi
+}
+
+case "$action" in
+    reset)
+        clear_session_opt "$session" '@ab_selected_window' || true
+        nudge_renderer
+        exit 0
+        ;;
+    up | down | enter) ;;
+    *) ab_usage "unknown action: $action" ;;
+esac
+
+windows=$(tmux list-windows -t "$session" -F '#{window_id} #{window_active}' 2>/dev/null) || exit 0
+[ -n "$windows" ] || exit 0
+selected=$(get_session_opt "$session" '@ab_selected_window')
+
+# Resolve the current selection, falling back to the active window, then step.
+# (Not named "target": the common.sh option helpers overwrite that global.)
+pick=$(printf '%s\n' "$windows" | awk -v sel="$selected" -v action="$action" '
+    { id[NR] = $1; if ($2 == "1") active = NR; if ($1 == sel) cur = NR }
+    END {
+        if (!cur) cur = active
+        if (!cur) cur = 1
+        if (action == "up" && cur > 1) cur--
+        if (action == "down" && cur < NR) cur++
+        print id[cur]
+    }
+')
+[ -n "$pick" ] || exit 0
+
+if [ "$action" = 'enter' ]; then
+    clear_session_opt "$session" '@ab_selected_window' || true
+    tmux select-window -t "$pick" >/dev/null 2>&1 || true
+else
+    set_session_opt "$session" '@ab_selected_window' "$pick" || true
+fi
+nudge_renderer

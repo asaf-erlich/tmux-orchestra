@@ -7,7 +7,8 @@ REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 compare_fixture() {
     input=$1
     expected=$2
-    actual=$(NO_COLOR=1 TERM=xterm render_rows 40 0 off '#d29922' <"$input")
+    selected=${3:-}
+    actual=$(NO_COLOR=1 TERM=xterm render_rows 40 0 off '#d29922' "$selected" <"$input")
     expected_text=$(cat "$expected")
     if [ "$actual" != "$expected_text" ]; then
         printf 'render mismatch for %s\n--- expected ---\n%s\n--- actual ---\n%s\n' "$input" "$expected_text" "$actual" >&2
@@ -19,6 +20,9 @@ compare_fixture "$REPO_DIR/tests/fixtures/render-idle.input" "$REPO_DIR/tests/fi
 compare_fixture "$REPO_DIR/tests/fixtures/render-running.input" "$REPO_DIR/tests/fixtures/render-running.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-waiting.input" "$REPO_DIR/tests/fixtures/render-waiting.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-unread.input" "$REPO_DIR/tests/fixtures/render-unread.expected"
+# Keyboard selection on the second (inactive) window: bar on its left edge,
+# active window keeps its heavy border. Trailing input fields are ignored.
+compare_fixture "$REPO_DIR/tests/fixtures/render-selected.input" "$REPO_DIR/tests/fixtures/render-selected.expected" '@2'
 
 check_inactive_border_color() {
     tmp_output=$(mktemp "${TMPDIR:-/tmp}/orchestra-render.XXXXXX")

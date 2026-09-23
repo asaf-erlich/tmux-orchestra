@@ -324,6 +324,7 @@ render_window_block() {
 	phase_icon=${19}
 	phase_color=${20}
 	spinner=${21:-}
+	selected=${22:-0}
 
 	title_text=$window_name
 	title_text=$title_text$(render_named_branch "$branch" "$nerd")
@@ -369,6 +370,14 @@ render_window_block() {
 		_v='│'
 	fi
 
+	# The keyboard selection replaces the left edge of every line with a bar
+	# and shows the title in reverse video, so it reads differently from the
+	# heavy-bordered active window and survives NO_COLOR.
+	if [ "$selected" = '1' ]; then
+		_tl='▌'
+		_v='▌'
+	fi
+
 	# Pick style: bold for active, color for waiting, both if both.
 	title_style=''
 	if [ "$window_active" = '1' ] && [ "$state" = 'waiting' ]; then
@@ -397,7 +406,9 @@ render_window_block() {
 	render_border_start "$window_active"
 	printf '%s%s ' "$_tl" "$_h"
 	render_border_end "$window_active"
+	[ "$selected" = '1' ] && render_inverse_start
 	with_style "$title_style" "$wait_color" '%s' "$title_body"
+	[ "$selected" = '1' ] && render_reset
 	render_border_start "$window_active"
 	printf ' '
 	render_repeat "$_h" "$pad_before_dot"
@@ -446,18 +457,24 @@ render_window_block() {
 	printf '\n'
 }
 
+# Usage: render_rows WIDTH FRAME NERD WAIT_COLOR [SELECTED_WINDOW_ID]
+# SELECTED_WINDOW_ID marks the keyboard selection; empty means none. Fields
+# after spinner on each input line are ignored.
 render_rows() {
 	width=$1
 	frame=$2
 	nerd=$3
 	wait_color=$4
+	selected_id=${5:-}
 
-	while IFS='|' read -r session_name window_id window_name window_active state action branch cwd last_cmd progress progress_label unread last_notification phase phase_icon phase_color spinner; do
+	while IFS='|' read -r session_name window_id window_name window_active state action branch cwd last_cmd progress progress_label unread last_notification phase phase_icon phase_color spinner _rest; do
 		[ -n "$window_id" ] || continue
+		is_selected=0
+		[ -n "$selected_id" ] && [ "$window_id" = "$selected_id" ] && is_selected=1
 		render_window_block "$width" "$frame" "$nerd" "$wait_color" \
 			"$session_name" "$window_id" "$window_name" "$window_active" \
 			"$state" "$action" "$branch" "$cwd" "$last_cmd" \
 			"$progress" "$progress_label" "$unread" "$last_notification" \
-			"$phase" "$phase_icon" "$phase_color" "$spinner"
+			"$phase" "$phase_icon" "$phase_color" "$spinner" "$is_selected"
 	done
 }

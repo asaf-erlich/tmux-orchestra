@@ -18,8 +18,10 @@ done
 ## Data read (one tmux call per tick)
 
 ```sh
-tmux list-windows -a -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}'
+tmux list-windows -a -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@ab_selected_window}|#{&&:#{window_active},#{==:#{pane_id},#{@ab_sidebar_pane_id}}}'
 ```
+
+The last two fields carry the keyboard selection and whether the sidebar has focus (see [sidebar.md](sidebar.md) **Keyboard selection**). `redraw` reduces them to one window id and passes it as the fifth argument of `render_rows`, which ignores any fields after `spinner`.
 
 For v0.1 only one status pill is rendered — `phase`. Iterating over arbitrary `@ab_status_*` keys requires a second tmux call per window and is deferred to v0.2.
 

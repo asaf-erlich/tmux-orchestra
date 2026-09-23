@@ -14,6 +14,8 @@ bin/
   orchestra-toggle      Open/close sidebar, cache width per session
   orchestra-follow      Move sidebar pane to new window on focus switch
   orchestra-notify      Platform-detecting notifier shim
+  orchestra-click       Map a sidebar click to select-window
+  orchestra-select      Move/confirm the sidebar keyboard selection
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
   render.sh             Pure rendering (boxes, glyphs, progress, ANSI)
@@ -64,6 +66,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 | `@ab_width` | orchestra-toggle | 8 chars | Session-scoped: cached pane width |
 | `@ab_sidebar_pane_id` | orchestra-toggle | — | Session-scoped: sidebar pane ID |
 | `@ab_sidebar_pid` | orchestra-toggle | — | Session-scoped: renderer PID |
+| `@ab_selected_window` | orchestra-select | — | Session-scoped: sidebar keyboard selection (window_id); unset = active window |
 
 `set_opt` / `clear_opt` / `get_opt` in [lib/common.sh](lib/common.sh) are the only correct way to read/write these options. They enforce truncation and prefix namespacing. Do not call `tmux set-option` directly for `@ab_*` options.
 
