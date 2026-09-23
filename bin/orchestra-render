@@ -23,6 +23,11 @@ sleep_interruptible() {
     sleep_pid=$!
     wait "$sleep_pid" 2>/dev/null || true
     kill "$sleep_pid" 2>/dev/null || true
+    # Reap the killed sleep here, with stderr silenced. Otherwise bash (macOS
+    # /bin/sh) reports "Terminated: 15 sleep" on the pane's tty the next time
+    # it checks job status, and the message flashes in the sidebar until the
+    # next redraw.
+    wait "$sleep_pid" 2>/dev/null || true
 }
 
 redraw() {
