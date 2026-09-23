@@ -140,11 +140,15 @@ resolve_session() {
 }
 
 window_exists() {
-    tmux display-message -p -t "$1" '#{window_id}' >/dev/null 2>&1
+    # display-message can exit 0 with empty output for a target that no longer
+    # exists, so treat an empty result as missing.
+    [ -n "$(tmux display-message -p -t "$1" '#{window_id}' 2>/dev/null)" ]
 }
 
 pane_exists() {
-    tmux display-message -p -t "$1" '#{pane_id}' >/dev/null 2>&1
+    # display-message can exit 0 with empty output for a target that no longer
+    # exists, so treat an empty result as missing.
+    [ -n "$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null)" ]
 }
 
 sanitize_status_key() {
