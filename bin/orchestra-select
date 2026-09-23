@@ -2,11 +2,13 @@
 # Keyboard selection in the sidebar.
 # Usage: orchestra-select <up|down|enter|reset> <session>
 #
-# The selection is stored as a window_id in the session option
-# @ab_selected_window so it survives window reordering. An unset or stale
-# value means "the active window". up/down move it (clamped at the ends)
-# without switching windows; enter runs select-window on it, the same effect
-# as a click; reset clears it. The sidebar's key reader does not run this: it
+# <session> is the viewing session (the sidebar's). The selection walks the
+# Claude windows of every session and is stored as a window_id in the global
+# option @orchestra_selected_window so it survives window reordering. An
+# unset or stale value means "the viewing session's active window". up/down
+# move it (clamped at the ends) without switching windows; enter shows it,
+# the same effect as a click (select-window, or switch-client -c for a window
+# in another session); reset clears it. The sidebar's key reader does not run this: it
 # sources lib/select.sh directly.
 set -eu
 
@@ -23,7 +25,7 @@ usage() {
 session=$2
 
 case "$1" in
-    reset) select_reset "$session" ;;
+    reset) select_reset ;;
     up) select_move "$session" -1 || exit 0 ;;
     down) select_move "$session" 1 || exit 0 ;;
     enter) select_move "$session" 0 enter || exit 0 ;;

@@ -1,6 +1,8 @@
 #!/bin/sh
-# Map a mouse-click Y coordinate in the sidebar to a tmux window and select it.
+# Map a mouse-click Y coordinate in the sidebar to a tmux window and show it.
 # Usage: orchestra-click <mouse_y> <session_name>
+# session_name is the sidebar's session (the viewing session). A window in
+# another session switches that session's client to it, as Enter does.
 set -eu
 
 ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
@@ -12,5 +14,6 @@ session_name=$2
 
 # Each window block rendered by window_block (lib/render.sh) is exactly 3 lines tall
 # (top border, detail row, meta row). The sidebar lists only Claude windows,
-# so the block index counts into the same filtered list (lib/select.sh).
+# from every session, so the block index counts into the same filtered list
+# (lib/select.sh).
 select_row "$session_name" $((mouse_y / 3))

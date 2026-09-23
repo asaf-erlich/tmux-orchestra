@@ -32,14 +32,15 @@ sleep_interruptible() {
 
 redraw() {
     # One tmux call: the sidebar pane's own width (tput cols inside $(...)
-    # sees no terminal and reports 80) and the two global options, then one
-    # line per pane of the session. Fields 18-20 carry @ab_selected_window,
-    # whether the sidebar has focus (it is the active pane of the active
-    # window) and whether the pane runs Claude Code (ORCHESTRA_CLAUDE_PANE,
-    # lib/select.sh); render_frame shows one block per window with a Claude
-    # pane.
-    if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}' \; \
-        list-panes -s ${TMUX_PANE:+-t "$TMUX_PANE"} -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@ab_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@ab_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE" 2>/dev/null); then
+    # sees no terminal and reports 80), the two global options and the
+    # sidebar's session (whose active window is the one the viewing client
+    # shows), then one line per pane of every session. Fields 18-20 carry
+    # @orchestra_selected_window, whether the sidebar has focus (it is the
+    # active pane of the active window) and whether the pane runs Claude Code
+    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); render_frame shows one block per
+    # window with a Claude pane.
+    if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}' \; \
+        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE" 2>/dev/null); then
         :
     else
         frame_dump=''
@@ -61,8 +62,6 @@ handle_keys() {
     cr=$(printf '\r')
     nl='
 '
-    # The sidebar moves between windows but never leaves its session.
-    session=''
     while :; do
         # min 1 time 0: dd returns as soon as input is available, with every
         # byte queued so far (keys pile up while an update runs). The x keeps
@@ -100,16 +99,10 @@ handle_keys() {
 }
 
 apply_selection() {
-    if [ -z "$session" ]; then
-        session=$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_id}' 2>/dev/null) || session=''
-    fi
-    [ -n "$session" ] || return 0
-    if ! select_move "$session" "$@"; then
-        # Stale cache (session renamed away or gone): resolve once more.
-        session=$(tmux display-message -p -t "${TMUX_PANE:-}" '#{session_id}' 2>/dev/null) || session=''
-        [ -n "$session" ] || return 0
-        select_move "$session" "$@" || return 0
-    fi
+    # The sidebar pane moves between sessions, so the viewing session is
+    # resolved from the pane itself on every burst (inside select_move's
+    # single list call, no extra tmux call).
+    select_move "${TMUX_PANE:-}" "$@" || return 0
     kill -USR1 "$renderer_pid" 2>/dev/null || true
 }
 

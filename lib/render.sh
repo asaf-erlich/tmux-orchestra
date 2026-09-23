@@ -221,31 +221,37 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 # Main program. mode=rows: every input line is a window; width, nerd,
 # wait_color and sel come from -v. mode=frame: the first line is
-# "WIDTH|NERD|WAIT_COLOR", then one line per pane (list-panes -s); only
-# windows with a Claude pane (field 20) are shown, once each, in input order,
-# and the selection is derived from fields 18-19.
+# "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION", then one line per pane of the server
+# (list-panes -a); only windows with a Claude pane (field 20) are shown, once
+# each, in input order, titled "session:window", and the selection is
+# derived from fields 18-19. window_active (field 4) is per session, so only
+# the active window of VIEW_SESSION (the sidebar's own session, i.e. what the
+# viewing client shows) is drawn as active; an empty VIEW_SESSION keeps
+# field 4 as is.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
 BEGIN { FS = "|" }
-mode == "frame" && NR == 1 { width = $1; nerd = $2; wait_color = $3; next }
+mode == "frame" && NR == 1 { width = $1; nerd = $2; wait_color = $3; view = $4; next }
 $2 == "" { next }
 mode != "frame" { n++; line[n] = $0; next }
 {
-	# Field 18 is @ab_selected_window (same on every line), field 19 is 1 on
-	# the sidebar pane when it is the active pane of the active window, i.e.
-	# the sidebar has focus.
+	# Field 18 is @orchestra_selected_window (same on every line), field 19
+	# is 1 on the sidebar pane when it is the active pane of the active
+	# window, i.e. the sidebar has focus.
 	s = $18
 	if ($19 == "1") focused = 1
 	# Field 20 is 1 when the pane runs Claude Code. Windows without one are
 	# hidden, which also hides @ab_agent_state etc. left behind when Claude
 	# exited without its Stop hook. Window fields are the same on every pane
-	# line, so the first Claude pane stands for its window.
-	if ($20 != "1" || ($2 in seen)) next
+	# line, so the first Claude pane stands for its window (a window linked
+	# into several sessions is listed under the first).
+	if ($20 != "1") next
+	if ($4 == "1" && (view == "" || $1 == view)) active_id = $2
+	if ($2 in seen) next
 	seen[$2] = 1
 	n++
 	line[n] = $0
 	if (n == 1) first_id = $2
-	if ($4 == "1") active_id = $2
 	if ($2 == s) valid = 1
 }
 END {
@@ -263,6 +269,10 @@ END {
 	out = ""
 	for (i = 1; i <= n; i++) {
 		split(line[i], f, "|")
+		if (mode == "frame") {
+			f[4] = (f[2] == active_id) ? "1" : "0"
+			f[3] = f[1] ":" f[3]
+		}
 		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && f[2] == sel)
 	}
 	if (mode == "frame" && n == 0) out = " " trim(width - 1, "no claude sessions") EL "\n"
@@ -282,11 +292,11 @@ render_rows() {
 }
 
 # Usage: render_frame FRAME
-# Reads "WIDTH|NERD|WAIT_COLOR" followed by the list-panes -s dump (window
-# fields 1-17, @ab_selected_window, the sidebar-focused flag and the Claude
-# pane flag as fields 18-20) and renders one block per window that has a
-# Claude pane, or a placeholder line when there is none. A non-numeric WIDTH
-# falls back to 32.
+# Reads "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION" followed by the list-panes -a
+# dump (window fields 1-17, @orchestra_selected_window, the sidebar-focused
+# flag and the Claude pane flag as fields 18-20) and renders one
+# "session:window" block per window that has a Claude pane, or a placeholder
+# line when there is none. A non-numeric WIDTH falls back to 32.
 render_frame() {
 	_render_color=0
 	render_supports_color && _render_color=1

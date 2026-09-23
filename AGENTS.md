@@ -2,7 +2,7 @@
 
 ## Project overview
 
-tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane showing, for each window running Claude Code, the agent state (running/waiting/done), status pills, progress bars, and notifications. State flows exclusively through tmux user-options (`@ab_*`); there are no daemons, sockets, or files outside tmux itself. The renderer polls every 125 ms and wakes early on SIGUSR1.
+tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane (one per tmux server) showing, for each window running Claude Code in any session, the agent state (running/waiting/done), status pills, progress bars, and notifications. State flows exclusively through tmux user-options (`@ab_*`); there are no daemons, sockets, or files outside tmux itself. The renderer polls every 125 ms and wakes early on SIGUSR1.
 
 ## Repository layout
 
@@ -11,10 +11,10 @@ orchestra.tmux          TPM entrypoint — init, hooks, keybindings
 bin/
   orchestra             CLI dispatcher (set-status, notify, set-state, …)
   orchestra-render      Long-lived sidebar TUI (125 ms polling loop)
-  orchestra-toggle      Open/close sidebar, cache width per session
-  orchestra-follow      Move sidebar pane to new window on focus switch
+  orchestra-toggle      Open/close the one global sidebar
+  orchestra-follow      Move sidebar pane to the focused window, any session
   orchestra-notify      Platform-detecting notifier shim
-  orchestra-click       Map a sidebar click to select-window
+  orchestra-click       Map a sidebar click to select-window / switch-client
   orchestra-select      Move/confirm the sidebar keyboard selection
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
@@ -47,7 +47,7 @@ README.md               User-facing installation and quick-start guide
 
 ## tmux option schema (authoritative)
 
-All persistent state is stored as tmux user-options. Window-scoped unless noted.
+All persistent state is stored as tmux user-options. Window-scoped unless noted. Sidebar state is global (`set-option -g`): there is one sidebar per server.
 
 | Option | Writer | Max | Notes |
 |---|---|---|---|
@@ -64,12 +64,14 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 | `@ab_cwd` | prompt hook | — | `$PWD` |
 | `@ab_last_cmd` | prompt hook | 80 chars | Last shell command |
 | `@ab_last_exit` | prompt hook | 32 chars | Last exit code |
-| `@ab_width` | orchestra-toggle | 8 chars | Session-scoped: cached pane width |
-| `@ab_sidebar_pane_id` | orchestra-toggle | — | Session-scoped: sidebar pane ID |
-| `@ab_sidebar_pid` | orchestra-toggle | — | Session-scoped: renderer PID |
-| `@ab_selected_window` | lib/select.sh | — | Session-scoped: sidebar keyboard selection (window_id); unset = active window |
+| `@orchestra_sidebar_width` | orchestra-toggle, after-resize-pane hook | — | Global: cached pane width |
+| `@orchestra_sidebar_pane_id` | orchestra-toggle | — | Global: the sidebar pane ID |
+| `@orchestra_sidebar_pid` | orchestra-toggle | — | Global: renderer PID |
+| `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (window_id); unset = the viewing session's active window |
 
-`set_opt` / `clear_opt` / `get_opt` in [lib/common.sh](lib/common.sh) are the only correct way to read/write these options. They enforce truncation and prefix namespacing. Do not call `tmux set-option` directly for `@ab_*` options.
+Earlier versions kept per-session `@ab_width`, `@ab_sidebar_pane_id`, `@ab_sidebar_pid` and `@ab_selected_window`; `orchestra.tmux` closes those sidebars and unsets the options on load.
+
+`set_opt` / `clear_opt` / `get_opt` in [lib/common.sh](lib/common.sh) are the only correct way to read/write the window options (the global sidebar options hold ids and numbers and are written directly with `set-option -g`). They enforce truncation and prefix namespacing. Do not call `tmux set-option` directly for `@ab_*` options.
 
 ## CLI interface (bin/orchestra)
 
@@ -90,11 +92,11 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 
 ## Renderer (bin/orchestra-render and lib/render.sh)
 
-- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-panes -s -F '...'`, one line per pane with a Claude flag), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
+- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-panes -a -F '...'`, one line per pane of every session with a Claude flag), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
 - Do not add tmux calls inside `render_rows`/`render_frame` or the awk program — rendering must remain pure.
 - The pipe-delimited format read from tmux is:
   `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude`
-- Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
+- Windows from every session are listed, in session-name then window-index order, titled `session:window`; only the sidebar's own session's active window is drawn active. Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
@@ -122,10 +124,10 @@ Prompt hooks batch multiple `set-option` calls with `\;` into one `tmux` invocat
 Do not introduce temp files, FIFOs, sockets, or environment variables as a persistence mechanism. All cross-process communication goes through `@ab_*` options and SIGUSR1.
 
 ### SIGUSR1 wakeup
-After writing state that should appear immediately in the sidebar (e.g., `notify`), send `kill -USR1 <renderer_pid>` where pid comes from `@ab_sidebar_pid`. The renderer may not be running (sidebar closed) — handle that case silently.
+After writing state that should appear immediately in the sidebar (e.g., `notify`), send `kill -USR1 <renderer_pid>` where pid comes from `@orchestra_sidebar_pid`. The renderer may not be running (sidebar closed) — handle that case silently.
 
 ### Sidebar pane lifecycle
-The sidebar is a real tmux pane running `orchestra-render`. `orchestra-follow` moves the pane across windows via `move-pane` on every `pane-focus-in`. The renderer PID stays alive across moves; always signal via `@ab_sidebar_pid`, not by searching process trees.
+The sidebar is a real tmux pane running `orchestra-render`. There is one per server. `orchestra-follow` moves the pane across windows and sessions via `move-pane` on every `pane-focus-in` and `client-session-changed`, and clears the global options if the pane is gone. The renderer PID stays alive across moves; always signal via `@orchestra_sidebar_pid`, not by searching process trees.
 
 ## Agent harness integration pattern
 
@@ -157,4 +159,4 @@ The items in [spec/FUTURE.md](spec/FUTURE.md) are explicitly deferred. Do not im
 | Change default config/keys | [orchestra.tmux](orchestra.tmux) — top-level option and bind-key calls |
 | Add a new harness template | `hooks/<name>/` — template files + README |
 | Debug option state | `tmux show-options -w @ab_*` in the target window |
-| Trace renderer input | `tmux list-panes -s -F '...'` (copy format from `orchestra-render`) |
+| Trace renderer input | `tmux list-panes -a -F '...'` (copy format from `orchestra-render`) |

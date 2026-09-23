@@ -1,0 +1,9 @@
+┌─ alpha:agent git:main ────────────────
+│· Bash: make
+│ 
+┌─ beta:review ─────────────────────────
+│? Allow edit?
+│ 
+┏━ beta:work git:dev ━━━━━━━━━━━━━━━━━━━
+┃ work
+┃ 

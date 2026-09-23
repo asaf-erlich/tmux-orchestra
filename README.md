@@ -12,7 +12,10 @@ Its a shameless rip-off of cmux, vibe-coded in a day. Its only saving grace is t
 
 - TPM-installable plugin entrypoint via `orchestra.tmux`
 - `orchestra` CLI for status pills, progress, notifications, and agent state
-- Long-lived `orchestra-render` sidebar pane that follows focus across windows
+- One long-lived `orchestra-render` sidebar per tmux server that lists the
+  windows running Claude Code in every session (`session:window`) and follows
+  focus across windows and sessions; Enter or a click on a window in another
+  session switches your client there
 - Bash and zsh prompt hooks for `cwd` / `branch` / last command
 - Claude Code hook template (working), OpenCode plugin (working), Codex stub
 - Shellcheck-clean shell implementation with tests under `make test`
@@ -56,7 +59,8 @@ run '~/.tmux/plugins/tpm/tpm'
    ```
 
 3. Install the plugin with `prefix + I` (capital i).
-4. Toggle the sidebar with `prefix + B`.
+4. Toggle the sidebar with `prefix + B`. There is one sidebar for the whole
+   tmux server; it moves to whichever window (in whichever session) you focus.
 5. *(Optional)* If your terminal has a Nerd-Font-patched font, enable nicer
    glyphs (braille spinners, `` branch, `●` unread dot, etc.):
 

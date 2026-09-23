@@ -5,19 +5,21 @@ ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 # shellcheck disable=SC1091
 . "$ORCHESTRA_LIB/common.sh"
 
+# There is one sidebar per server, recorded in global options
+# (@orchestra_sidebar_pane_id, @orchestra_sidebar_pid, @orchestra_sidebar_width)
+# so orchestra-follow can move it across sessions. Toggle closes it wherever
+# it is, or opens it in the current window.
 plugin_dir=$(ab_plugin_dir)
 current_window=$(resolve_window '')
-session_name=$(resolve_session "$current_window") || ab_tmux_fail 'failed to resolve session'
 
-sidebar_pane=$(get_session_opt "$session_name" '@ab_sidebar_pane_id')
+sidebar_pane=$(tmux show-options -gqv @orchestra_sidebar_pane_id 2>/dev/null || true)
 if [ -n "$sidebar_pane" ] && pane_exists "$sidebar_pane"; then
     tmux kill-pane -t "$sidebar_pane" >/dev/null 2>&1 || ab_tmux_fail 'failed to close sidebar'
-    clear_session_opt "$session_name" '@ab_sidebar_pane_id' || ab_tmux_fail 'failed to clear sidebar pane id'
-    clear_session_opt "$session_name" '@ab_sidebar_pid' || ab_tmux_fail 'failed to clear sidebar pid'
+    tmux set-option -gqu @orchestra_sidebar_pane_id \; set-option -gqu @orchestra_sidebar_pid >/dev/null 2>&1 || ab_tmux_fail 'failed to clear sidebar options'
     exit 0
 fi
 
-width=$(get_session_opt "$session_name" '@ab_width')
+width=$(tmux show-options -gqv @orchestra_sidebar_width 2>/dev/null || true)
 if [ -z "$width" ]; then
     width=$(tmux show-options -gvq @orchestra_width 2>/dev/null || printf '32')
 fi
@@ -26,11 +28,11 @@ case "$width" in
 esac
 
 pane_info=$(tmux split-window -bhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
-new_pane=$(printf '%s' "$pane_info" | awk -F'|' 'NR==1 { print $1 }')
-new_pid=$(printf '%s' "$pane_info" | awk -F'|' 'NR==1 { print $2 }')
+new_pane=${pane_info%%|*}
+new_pid=${pane_info#*|}
 
 tmux set-option -pt "$new_pane" pane-border-status off >/dev/null 2>&1 || true
 
-set_session_opt "$session_name" '@ab_sidebar_pane_id' "$new_pane" || ab_tmux_fail 'failed to store sidebar pane id'
-set_session_opt "$session_name" '@ab_sidebar_pid' "$new_pid" || ab_tmux_fail 'failed to store sidebar pid'
-set_session_opt "$session_name" '@ab_width' "$width" || ab_tmux_fail 'failed to store sidebar width'
+tmux set-option -gq @orchestra_sidebar_pane_id "$new_pane" \; \
+    set-option -gq @orchestra_sidebar_pid "$new_pid" \; \
+    set-option -gq @orchestra_sidebar_width "$width" >/dev/null 2>&1 || ab_tmux_fail 'failed to store sidebar options'
