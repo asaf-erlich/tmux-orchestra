@@ -1,2 +1,2 @@
-dev|@1|build|1|||main|/tmp/project|ls|||||||||@2|0
-dev|@2|tests|0|running|Bash: pytest||||0.7|Tests||Waiting for input|phase|>|yellow||@2|0
+dev|@1|build|1|||main|/tmp/project|ls|||||||||@2|0|1
+dev|@2|tests|0|running|Bash: pytest||||0.7|Tests||Waiting for input|phase|>|yellow||@2|0|1

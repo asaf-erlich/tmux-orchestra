@@ -33,10 +33,13 @@ sleep_interruptible() {
 redraw() {
     # One tmux call: the sidebar pane's own width (tput cols inside $(...)
     # sees no terminal and reports 80) and the two global options, then one
-    # line per window. Fields 18-19 carry @ab_selected_window and whether the
-    # sidebar has focus (active window whose active pane is the sidebar).
+    # line per pane of the session. Fields 18-20 carry @ab_selected_window,
+    # whether the sidebar has focus (it is the active pane of the active
+    # window) and whether the pane runs Claude Code (ORCHESTRA_CLAUDE_PANE,
+    # lib/select.sh); render_frame shows one block per window with a Claude
+    # pane.
     if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}' \; \
-        list-windows ${TMUX_PANE:+-t "$TMUX_PANE"} -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@ab_selected_window}|#{&&:#{window_active},#{==:#{pane_id},#{@ab_sidebar_pane_id}}}' 2>/dev/null); then
+        list-panes -s ${TMUX_PANE:+-t "$TMUX_PANE"} -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@ab_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@ab_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE" 2>/dev/null); then
         :
     else
         frame_dump=''

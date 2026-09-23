@@ -1,5 +1,5 @@
 # Pure rendering helpers for the sidebar. Tests source this file directly with
-# fixture data, while the renderer feeds it one line per tmux window.
+# fixture data, while the renderer feeds it one line per tmux pane.
 #
 # The whole frame is produced by a single awk process: process creation is
 # slow on some systems (endpoint security scanning every exec), so rendering
@@ -146,7 +146,7 @@ function with_style(style, c, text,    s) {
 }
 
 # One window block: exactly three lines (orchestra-click depends on this).
-# f[] holds the pipe-separated fields of one list-windows line.
+# f[] holds the pipe-separated window fields of one input line.
 function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out) {
 	active = f[4]; state = f[5]
 
@@ -221,34 +221,43 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 # Main program. mode=rows: every input line is a window; width, nerd,
 # wait_color and sel come from -v. mode=frame: the first line is
-# "WIDTH|NERD|WAIT_COLOR" and the selection is derived from fields 18-19.
+# "WIDTH|NERD|WAIT_COLOR", then one line per pane (list-panes -s); only
+# windows with a Claude pane (field 20) are shown, once each, in input order,
+# and the selection is derived from fields 18-19.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
 BEGIN { FS = "|" }
 mode == "frame" && NR == 1 { width = $1; nerd = $2; wait_color = $3; next }
 $2 == "" { next }
+mode != "frame" { n++; line[n] = $0; next }
 {
+	# Field 18 is @ab_selected_window (same on every line), field 19 is 1 on
+	# the sidebar pane when it is the active pane of the active window, i.e.
+	# the sidebar has focus.
+	s = $18
+	if ($19 == "1") focused = 1
+	# Field 20 is 1 when the pane runs Claude Code. Windows without one are
+	# hidden, which also hides @ab_agent_state etc. left behind when Claude
+	# exited without its Stop hook. Window fields are the same on every pane
+	# line, so the first Claude pane stands for its window.
+	if ($20 != "1" || ($2 in seen)) next
+	seen[$2] = 1
 	n++
 	line[n] = $0
-	if (mode == "frame") {
-		# Field 18 is @ab_selected_window (same on every line), field 19 is
-		# 1 on the active window when its active pane is the sidebar, i.e.
-		# the sidebar has focus.
-		s = $18
-		if ($4 == "1") active_id = $2
-		if ($2 == s) valid = 1
-		if ($19 == "1") focused = 1
-	}
+	if (n == 1) first_id = $2
+	if ($4 == "1") active_id = $2
+	if ($2 == s) valid = 1
 }
 END {
 	if (mode == "frame") {
 		if (width !~ /^[0-9]+$/) width = 32
 		# Show the selection while focused, falling back to the active window
-		# when the stored id is unset or stale. Unfocused, show it only if it
-		# points somewhere other than the active window (mouse wheel).
+		# (or the first listed one when the active window is not listed) when
+		# the stored id is unset or stale. Unfocused, show it only if it points
+		# somewhere other than the active window (mouse wheel).
 		sel = ""
 		if (valid) { if (focused || s != active_id) sel = s }
-		else if (focused) sel = active_id
+		else if (focused) sel = (active_id != "") ? active_id : first_id
 	}
 	init_styles()
 	out = ""
@@ -256,6 +265,7 @@ END {
 		split(line[i], f, "|")
 		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && f[2] == sel)
 	}
+	if (mode == "frame" && n == 0) out = " " trim(width - 1, "no claude sessions") EL "\n"
 	printf "%s", out
 }
 '
@@ -272,9 +282,11 @@ render_rows() {
 }
 
 # Usage: render_frame FRAME
-# Reads "WIDTH|NERD|WAIT_COLOR" followed by the list-windows dump (with
-# @ab_selected_window and the sidebar-focused flag as fields 18 and 19) and
-# renders every window block. A non-numeric WIDTH falls back to 32.
+# Reads "WIDTH|NERD|WAIT_COLOR" followed by the list-panes -s dump (window
+# fields 1-17, @ab_selected_window, the sidebar-focused flag and the Claude
+# pane flag as fields 18-20) and renders one block per window that has a
+# Claude pane, or a placeholder line when there is none. A non-numeric WIDTH
+# falls back to 32.
 render_frame() {
 	_render_color=0
 	render_supports_color && _render_color=1

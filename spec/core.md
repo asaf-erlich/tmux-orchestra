@@ -49,7 +49,7 @@ All shell scripts start with `#!/bin/sh` and `set -eu`. Library files in `lib/` 
 
 ## User-option schema (authoritative)
 
-All options are tmux **window** options unless noted. Keys are literal — the renderer does `tmux list-windows -F '#{@ab_agent_state}|...'` and parses by position.
+All options are tmux **window** options unless noted. Keys are literal — the renderer does `tmux list-panes -s -F '#{@ab_agent_state}|...'` and parses by position (window options resolve on every pane line).
 
 | Option | Type | Writer | Cleared by |
 |---|---|---|---|

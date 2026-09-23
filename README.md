@@ -131,7 +131,7 @@ make test
 ## Key implementation decisions
 
 - **Polling renderer, hook-assisted wakeups:** tmux does not emit hooks for
-  arbitrary user-option writes, so the renderer uses a single `list-windows`
+  arbitrary user-option writes, so the renderer uses a single `list-panes`
   poll every 125 ms and lets hooks wake it early on focus and rename events.
 - **tmux options as the only datastore:** every state update is written into
   tmux options to keep the plugin installable without files, sockets, or extra

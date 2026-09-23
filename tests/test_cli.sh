@@ -18,6 +18,28 @@ exec $(command -v tmux) -L "$SOCKET" "\$@"
 EOF
 chmod +x "$TMP_DIR/tmux"
 PATH=$TMP_DIR:$REPO_DIR/bin:$PATH
+# shellcheck disable=SC1091
+. "$REPO_DIR/lib/select.sh"
+
+# A fake Claude Code: a copy of sleep named like a version, which is what
+# pane_current_command shows for the real (version-named) binary. macOS kills
+# a copied platform binary unless it is re-signed.
+cp "$(command -v sleep)" "$TMP_DIR/2.1.999"
+if command -v codesign >/dev/null 2>&1; then
+    codesign -f -s - "$TMP_DIR/2.1.999" >/dev/null 2>&1 || true
+fi
+
+# Usage: start_claude WINDOW_ID
+# Splits a fake Claude pane into WINDOW_ID and waits until tmux reports it.
+start_claude() {
+    claude_pane=$(tmux split-window -d -t "$1" -P -F '#{pane_id}' "$TMP_DIR/2.1.999 600")
+    tries=0
+    until [ "$(tmux display-message -p -t "$claude_pane" '#{pane_current_command}')" = '2.1.999' ]; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 50 ] || { printf 'fake claude pane did not start\n' >&2; exit 1; }
+        sleep 0.1
+    done
+}
 
 tmux -f /dev/null new-session -d -s orchestra-tests
 window_id=$(tmux display-message -p -t orchestra-tests '#{window_id}')
@@ -90,38 +112,58 @@ assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_current_action 2>/de
 orchestra clear-state --window "$window_id"
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" 'clear-state clears agent state'
 
-# Mouse click: orchestra-click <y> <session> selects the window at block y/3.
-# Create a second window so we have two to click between.
+# The Claude pane detection format matches the version-named binary only.
+start_claude "$window_id"
+window1_claude_pane=$claude_pane
+assert_eq '1' "$(tmux display-message -p -t "$window1_claude_pane" "$ORCHESTRA_CLAUDE_PANE")" 'a version-named pane counts as Claude'
+assert_eq '0' "$(tmux display-message -p -t "$window_id.0" "$ORCHESTRA_CLAUDE_PANE")" 'a shell pane does not count as Claude'
+
+# The sidebar lists only Claude windows, so clicks and the keyboard
+# selection skip the others: a plain shell window, and one with a stale
+# "running" state left behind by a Claude that exited without its Stop hook.
+plain_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
 window2_info=$(tmux new-window -t orchestra-tests -P -F '#{window_id}|#{pane_id}')
 window2_id=${window2_info%%|*}
 pane2_id=${window2_info#*|}
-# Switch back to window 1 so it is the active window.
+start_claude "$window2_id"
+stale_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+orchestra set-state running --action 'Bash: ls' --window "$stale_id"
+
+# Mouse click: orchestra-click <y> <session> selects the listed window at
+# block y/3.
 tmux select-window -t "$window_id"
 active_before=$(tmux display-message -p -t orchestra-tests '#{window_id}')
 assert_eq "$window_id" "$active_before" 'window 1 is active before click'
-# Y=3 → block 1 → second window (0-indexed).
+# Y=3 → block 1 → second Claude window, skipping the plain window.
 orchestra-click 3 orchestra-tests
 active_after=$(tmux display-message -p -t orchestra-tests '#{window_id}')
-assert_eq "$window2_id" "$active_after" 'orchestra-click selects the correct window'
+assert_eq "$window2_id" "$active_after" 'orchestra-click skips non-Claude windows'
 # Y=0 → block 0 → first window.
 orchestra-click 0 orchestra-tests
 active_back=$(tmux display-message -p -t orchestra-tests '#{window_id}')
 assert_eq "$window_id" "$active_back" 'orchestra-click y=0 selects first window'
-# Y beyond last window → no crash, no window change.
+# Y=6 → block 2 → only the stale and plain windows remain, neither listed.
+orchestra-click 6 orchestra-tests
+active_unchanged=$(tmux display-message -p -t orchestra-tests '#{window_id}')
+assert_eq "$window_id" "$active_unchanged" 'orchestra-click past the last Claude window is a no-op'
 orchestra-click 999 orchestra-tests
 active_unchanged=$(tmux display-message -p -t orchestra-tests '#{window_id}')
 assert_eq "$window_id" "$active_unchanged" 'orchestra-click out-of-range is a no-op'
 
-# Keyboard selection: orchestra-select moves @ab_selected_window without
-# switching windows, clamps at both ends, and enter selects it.
+# Keyboard selection: orchestra-select moves @ab_selected_window across the
+# Claude windows without switching windows, clamps at both ends, and enter
+# selects it.
 window3_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+start_claude "$window3_id"
 tmux select-window -t "$window_id"
 orchestra-select up orchestra-tests
 assert_eq "$window_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection starts on the active window and clamps at the top'
 orchestra-select down orchestra-tests
+assert_eq "$window2_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection skips the plain window'
 orchestra-select down orchestra-tests
+assert_eq "$window3_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection skips the stale-state window'
 orchestra-select down orchestra-tests
-assert_eq "$window3_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection moves down and clamps at the bottom'
+assert_eq "$window3_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'selection clamps at the bottom'
 assert_eq "$window_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'moving the selection does not switch windows'
 orchestra-select enter orchestra-tests
 assert_eq "$window3_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'enter selects the highlighted window'
@@ -131,7 +173,18 @@ orchestra-select up orchestra-tests
 assert_eq "$window2_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'a stale selection falls back to the active window'
 orchestra-select reset orchestra-tests
 assert_eq '' "$(tmux show-options -v -t orchestra-tests @ab_selected_window 2>/dev/null || printf '')" 'reset clears the selection'
+# From a window without Claude, the selection falls back to the first
+# Claude window.
+tmux select-window -t "$plain_id"
+orchestra-select down orchestra-tests
+assert_eq "$window2_id" "$(tmux show-options -v -t orchestra-tests @ab_selected_window)" 'a non-Claude active window falls back to the first Claude window'
+orchestra-select reset orchestra-tests
+tmux select-window -t "$plain_id"
+orchestra-select enter orchestra-tests
+assert_eq "$window_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'enter from a non-Claude window selects the first Claude window'
 tmux kill-window -t "$window3_id"
+tmux kill-window -t "$plain_id"
+tmux kill-window -t "$stale_id"
 tmux select-window -t "$window_id"
 
 # A stale ORCHESTRA_WINDOW_ID must not override the pane the command is

@@ -2,7 +2,7 @@
 
 ## Project overview
 
-tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane showing per-window agent state (running/waiting/done), status pills, progress bars, and notifications. State flows exclusively through tmux user-options (`@ab_*`); there are no daemons, sockets, or files outside tmux itself. The renderer polls every 125 ms and wakes early on SIGUSR1.
+tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane showing, for each window running Claude Code, the agent state (running/waiting/done), status pills, progress bars, and notifications. State flows exclusively through tmux user-options (`@ab_*`); there are no daemons, sockets, or files outside tmux itself. The renderer polls every 125 ms and wakes early on SIGUSR1.
 
 ## Repository layout
 
@@ -18,7 +18,7 @@ bin/
   orchestra-select      Move/confirm the sidebar keyboard selection
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
-  select.sh             Sidebar keyboard selection (orchestra-select + key reader)
+  select.sh             Claude-window filter, keyboard selection, click mapping
   render.sh             Pure rendering (boxes, glyphs, progress, ANSI)
   notify.sh             Platform notifier dispatch (Linux/macOS/WSL)
 hooks/
@@ -90,10 +90,11 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 
 ## Renderer (bin/orchestra-render and lib/render.sh)
 
-- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-windows -F '...'`), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
+- `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-panes -s -F '...'`, one line per pane with a Claude flag), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
 - Do not add tmux calls inside `render_rows`/`render_frame` or the awk program — rendering must remain pure.
 - The pipe-delimited format read from tmux is:
-  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color`
+  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude`
+- Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
@@ -156,4 +157,4 @@ The items in [spec/FUTURE.md](spec/FUTURE.md) are explicitly deferred. Do not im
 | Change default config/keys | [orchestra.tmux](orchestra.tmux) — top-level option and bind-key calls |
 | Add a new harness template | `hooks/<name>/` — template files + README |
 | Debug option state | `tmux show-options -w @ab_*` in the target window |
-| Trace renderer input | `tmux list-windows -F '...'` (copy format from `orchestra-render`) |
+| Trace renderer input | `tmux list-panes -s -F '...'` (copy format from `orchestra-render`) |

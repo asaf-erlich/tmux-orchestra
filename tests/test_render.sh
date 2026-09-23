@@ -25,8 +25,9 @@ compare_fixture "$REPO_DIR/tests/fixtures/render-unread.input" "$REPO_DIR/tests/
 compare_fixture "$REPO_DIR/tests/fixtures/render-selected.input" "$REPO_DIR/tests/fixtures/render-selected.expected" '@2'
 
 # render_frame (the live path): width, nerd fonts and wait color come from a
-# header line and the selection from fields 18-19. Unfocused (field 19 is 0)
-# with @2 stored while @1 is active, so @2 is shown.
+# header line, the selection from fields 18-19 and the Claude pane flag from
+# field 20. Unfocused (field 19 is 0) with @2 stored while @1 is active, so
+# @2 is shown.
 check_render_frame() {
     actual=$({ printf '40|off|#d29922\n'; cat "$REPO_DIR/tests/fixtures/render-selected.input"; } | NO_COLOR=1 TERM=xterm render_frame 0)
     expected_text=$(cat "$REPO_DIR/tests/fixtures/render-selected.expected")
@@ -36,7 +37,7 @@ check_render_frame() {
     fi
     # Focused on the active window with nothing stored: the active window is
     # selected. A non-numeric width falls back to 32.
-    actual=$(printf '%s\n' 'x|off|' 'dev|@1|build|1|||||||||||||||1' 'dev|@2|tests|0|||||||||||||||0' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '1p;4p')
+    actual=$(printf '%s\n' 'x|off|' 'dev|@1|build|1|||||||||||||||1|1' 'dev|@2|tests|0|||||||||||||||0|1' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '1p;4p')
     expected_text=$(printf '%s\n' '▌━ build ━━━━━━━━━━━━━━━━━━━━━━━' '┌─ tests ───────────────────────')
     if [ "$actual" != "$expected_text" ]; then
         printf 'render_frame focus/width mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
@@ -44,6 +45,34 @@ check_render_frame() {
     fi
 }
 check_render_frame
+
+# Only windows with a Claude pane are listed. The input is one line per pane:
+# @1 has only a shell, @2 has only a shell and a stale "running" state left
+# behind by a Claude that exited without its Stop hook, @3 (active) has the
+# focused sidebar pane, a shell and a Claude pane, so it is listed once.
+check_claude_filter() {
+    actual=$({ printf '40|off|#d29922\n'; cat "$REPO_DIR/tests/fixtures/render-claude-filter.input"; } | NO_COLOR=1 TERM=xterm render_frame 0)
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-claude-filter.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame claude filter mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    # No Claude pane anywhere: a placeholder instead of a blank pane.
+    actual=$(printf '%s\n' '40|off|' 'dev|@1|shell|1|running|stale||||||||||||0|1|0' | NO_COLOR=1 TERM=xterm render_frame 0)
+    if [ "$actual" != ' no claude sessions' ]; then
+        printf 'render_frame placeholder mismatch\nactual: %s\n' "$actual" >&2
+        exit 1
+    fi
+    # Focused while the active window has no Claude pane: the selection
+    # falls back to the first listed window.
+    actual=$(printf '%s\n' '40|off|' 'dev|@1|shell|1|||||||||||||||1|0' 'dev|@2|a|0|||||||||||||||0|1' 'dev|@3|b|0|||||||||||||||0|1' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '1p;4p')
+    expected_text=$(printf '%s\n' '▌─ a ───────────────────────────────────' '┌─ b ───────────────────────────────────')
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame fallback selection mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+}
+check_claude_filter
 
 check_inactive_border_color() {
     tmp_output=$(mktemp "${TMPDIR:-/tmp}/orchestra-render.XXXXXX")

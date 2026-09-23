@@ -1,0 +1,5 @@
+dev|@1|plain|0|||main|/tmp/plain|ls||||||||||0|0
+dev|@2|stale|0|running|Bash: pytest||/tmp/stale|git status||||||||claude||0|0
+dev|@3|agent|1|waiting|Allow edit?|main|/tmp/agent|||||||||claude||1|0
+dev|@3|agent|1|waiting|Allow edit?|main|/tmp/agent|||||||||claude||0|1
+dev|@3|agent|1|waiting|Allow edit?|main|/tmp/agent|||||||||claude||0|1
