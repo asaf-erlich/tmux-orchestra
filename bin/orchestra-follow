@@ -5,22 +5,48 @@ ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 # shellcheck disable=SC1091
 . "$ORCHESTRA_LIB/common.sh"
 
-# Get the window that just received focus.
-current_window=$(tmux display-message -p '#{window_id}' 2>/dev/null) || exit 0
+# Usage: orchestra-follow WINDOW_ID PANE_ID
+#
+# The pane-focus-in hook passes the window and pane that received focus. An
+# untargeted display-message inside a hook's run-shell resolves against
+# whichever client tmux considers current, which can be a window in another
+# session. Following that window moves the wrong sidebar and runs select-pane
+# there, which fires pane-focus-in again and can loop indefinitely.
+if [ $# -ge 2 ]; then
+    current_window=$1
+    target_pane=$2
+else
+    current_window=$(tmux display-message -p '#{window_id}' 2>/dev/null) || exit 0
+    target_pane=
+fi
+[ -n "$current_window" ] || exit 0
 
-session_name=$(resolve_session "$current_window") || ab_tmux_fail 'failed to resolve session'
+session_name=$(resolve_session "$current_window") || exit 0
+[ -n "$session_name" ] || exit 0
 
 sidebar_pane=$(get_session_opt "$session_name" '@ab_sidebar_pane_id')
 [ -n "$sidebar_pane" ] || exit 0
 
 # Which window currently hosts the sidebar?
 sidebar_window=$(tmux display-message -p -t "$sidebar_pane" '#{window_id}' 2>/dev/null) || exit 0
+[ -n "$sidebar_window" ] || exit 0
 
-# Already here — nothing to do.
+# Already here — nothing to do. This also ends the chain started by our own
+# select-pane below, whose pane-focus-in lands in the window we moved into.
 [ "$sidebar_window" != "$current_window" ] || exit 0
 
-# Target the active pane in the current window.
-target_pane=$(tmux display-message -p -t "$current_window" '#{pane_id}' 2>/dev/null) || exit 0
+# Never try to move the sidebar next to itself.
+[ "$target_pane" != "$sidebar_pane" ] || exit 0
+
+# Fall back to the active pane in the current window.
+if [ -z "$target_pane" ]; then
+    target_pane=$(tmux display-message -p -t "$current_window" '#{pane_id}' 2>/dev/null) || exit 0
+fi
+[ -n "$target_pane" ] || exit 0
+
+# The focused pane must still belong to the window we are following.
+target_window=$(tmux display-message -p -t "$target_pane" '#{window_id}' 2>/dev/null) || exit 0
+[ "$target_window" = "$current_window" ] || exit 0
 
 # Determine width.
 width=$(get_session_opt "$session_name" '@ab_width')
@@ -35,5 +61,10 @@ esac
 # If the source window contained only this pane, tmux closes that window.
 tmux move-pane -dhb -l "$width" -s "$sidebar_pane" -t "$target_pane" >/dev/null 2>&1 || true
 
-# Return focus to the main content pane, not the sidebar.
-tmux select-pane -t "$target_pane" >/dev/null 2>&1 || true
+# Return focus to the main content pane, not the sidebar. move-pane -d leaves
+# the active pane alone, so only select when needed; every select-pane is
+# another pane-focus-in event.
+active=$(tmux display-message -p -t "$target_pane" '#{pane_active}' 2>/dev/null || true)
+if [ "$active" != 1 ]; then
+    tmux select-pane -t "$target_pane" >/dev/null 2>&1 || true
+fi
