@@ -8,6 +8,27 @@ that state in a dedicated sidebar pane.
 
 Its a shameless rip-off of cmux, vibe-coded in a day. Its only saving grace is that it is super handy. And has mouse support.
 
+## What this fork adds
+
+This is a fork of
+[gauravmm/tmux-orchestra](https://github.com/gauravmm/tmux-orchestra). Compared
+with upstream, it:
+
+- lists **background Claude Code sessions** (`claude --bg`, FleetView) under a
+  separator, and opens one in a new window with `claude attach` on Enter or a
+  click
+- keeps **one sidebar per tmux server**, listing Claude windows from every
+  session and switching your client on Enter or a click
+- lists **only windows running Claude Code**, so stale state never shows
+- adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
+- shows each window's **finish age**, **last prompt** and an
+  **empty-session** marker
+- redraws about **9x faster** (one tmux call and one awk pass per frame)
+- fixes a **focus loop** that could crash the terminal, a sidebar that got
+  stuck after its pane closed, and tmux.conf options being overwritten
+
+See [CHANGELOG.md](CHANGELOG.md) for details.
+
 ## Highlights
 
 - TPM-installable plugin entrypoint via `orchestra.tmux`
