@@ -177,6 +177,38 @@ assert_eq 'fix the flaky | test' "$(tmux show-options -v -w -t "$window_id" @ab_
 orchestra clear-state --window "$window_id"
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" 'clear-state clears agent state'
 
+# Claude Code hook dispatcher. Events arrive as JSON on stdin; the window
+# comes from ORCHESTRA_WINDOW_ID since the test shell has no TMUX_PANE.
+hook() {
+    printf '%s' "$2" | env -u TMUX_PANE ORCHESTRA_WINDOW_ID="$window_id" orchestra-claude-hook "$1"
+}
+opt() {
+    tmux show-options -v -w -t "$window_id" "$1" 2>/dev/null || printf ''
+}
+hook session-start '{"source":"clear"}'
+assert_eq 'clear' "$(opt @ab_session_source)" 'session-start after /clear marks the session empty'
+assert_eq '' "$(opt @ab_last_prompt)" 'session-start after /clear drops the old prompt'
+hook prompt '{"prompt":"run the\ntests"}'
+assert_eq 'run the tests' "$(opt @ab_last_prompt)" 'prompt hook stores the prompt'
+assert_eq '' "$(opt @ab_session_source)" 'prompt hook drops the empty-session marker'
+assert_eq 'running' "$(opt @ab_agent_state)" 'prompt hook marks running'
+hook pre-tool '{"tool_name":"Bash","tool_input":{"command":"make test","description":"Run the  tests"}}'
+assert_eq 'Bash: Run the tests' "$(opt @ab_current_action)" 'pre-tool prefers the tool description'
+hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+assert_eq 'waiting' "$(opt @ab_agent_state)" 'a permission prompt marks waiting'
+assert_eq 'allow? Bash: Run the tests' "$(opt @ab_current_action)" 'a permission prompt names the pending tool'
+hook stop '{}'
+assert_eq '' "$(opt @ab_agent_state)" 'stop clears the state'
+assert_eq '1' "$(opt @ab_unread)" 'stop marks a window nobody is looking at unread'
+hook notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+assert_eq '' "$(opt @ab_agent_state)" 'the idle reminder does not mark waiting'
+printf '%s\n' '{"type":"user","message":{"content":"first ask"}}' \
+    '{"type":"user","message":{"content":[{"type":"text","text":"second ask"}]}}' \
+    '{"type":"user","message":{"content":[{"type":"tool_result","content":"x"}]}}' \
+    '{"type":"user","message":{"content":"<command-name>/model</command-name>"}}' >"$TMP_DIR/transcript.jsonl"
+hook session-start "{\"source\":\"resume\",\"transcript_path\":\"$TMP_DIR/transcript.jsonl\"}"
+assert_eq 'second ask' "$(opt @ab_last_prompt)" 'session-start on resume restores the last typed prompt'
+
 # The Claude pane detection format matches the version-named binary only.
 start_claude "$window_id"
 window1_claude_pane=$claude_pane

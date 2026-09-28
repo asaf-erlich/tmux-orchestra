@@ -37,12 +37,12 @@ redraw() {
     # shows), then one line per pane of every session. Fields 18-20 carry
     # @orchestra_selected_window, whether the sidebar has focus (it is the
     # active pane of the active window) and whether the pane runs Claude Code
-    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); fields 21-23 carry the finish
-    # time, the window's last output time and the last prompt (last, as it
-    # may contain "|"). render_frame shows one block per window with a Claude
-    # pane.
+    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); fields 21-24 carry the finish
+    # time, the window's last output time, the session source and the last
+    # prompt (last, as it may contain "|"). render_frame shows one block per
+    # window with a Claude pane.
     if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}' \; \
-        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_last_prompt}" 2>/dev/null); then
+        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{@ab_last_prompt}" 2>/dev/null); then
         :
     else
         frame_dump=''

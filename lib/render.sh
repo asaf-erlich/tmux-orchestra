@@ -123,7 +123,6 @@ function cwd_label(cwd,    n, parts, i, label) {
 		if (parts[i] != "") { label = parts[i]; break }
 	}
 	if (label == "") label = "/"
-	if (length(label) > 16) label = substr(label, length(label) - 15)
 	return label
 }
 
@@ -148,10 +147,22 @@ function age_styled(t, text,    d) {
 	return text
 }
 
-function activity_text(state, action, cwd, last_cmd, prompt) {
+# Idle with no prompt since /clear or a fresh start (@ab_session_source):
+# nothing to come back to. "agents" is the `claude agents` manager view.
+function empty_text(source) {
+	if (source == "clear") return "∅ cleared"
+	if (source == "agents") return "◇ agents view"
+	if (source != "") return "∅ empty session"
+	return ""
+}
+
+function activity_text(state, action, cwd, last_cmd, prompt, source) {
 	if (state == "running" || state == "waiting") return action
 	if (prompt != "") return "❯ " prompt
-	if (cwd != "" && last_cmd != "") return cwd_label(cwd) "  $ " last_cmd
+	if (source != "") return empty_text(source)
+	# Sharing the row with the command, the directory keeps its first 24
+	# characters; alone it is trimmed to the row width like any other text.
+	if (cwd != "" && last_cmd != "") return trim(24, cwd_label(cwd)) "  $ " last_cmd
 	if (last_cmd != "") return "$ " last_cmd
 	return cwd_label(cwd)
 }
@@ -168,9 +179,10 @@ function with_style(style, c, text,    s) {
 }
 
 # One window block: exactly three lines (orchestra-click depends on this).
-# f[] holds the pipe-separated window fields of one input line; f[23] is the
-# last prompt with any "|" it contained rejoined.
-function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail) {
+# f[] holds the pipe-separated window fields of one input line; f[23] is
+# @ab_session_source and f[24] the last prompt with any "|" it contained
+# rejoined.
+function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color) {
 	active = f[4]; state = f[5]
 
 	# How long ago the agent last finished (@ab_finished_at, falling back to
@@ -187,7 +199,9 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	pad = width - length(title) - 4 - tail
 	if (pad < 0) pad = 0
 
-	activity = activity_text(state, f[6], f[8], f[9], f[23])
+	idle = (state != "running" && state != "waiting")
+	empty = (idle && f[24] == "" && f[23] != "")
+	activity = activity_text(state, f[6], f[8], f[9], f[24], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	if (glyph != "" && activity != "") activity = trim(width - 3, activity)
@@ -203,15 +217,13 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 		if (meta != "") meta = meta "  "
 		meta = meta ptext
 	}
-	# Otherwise the meta row carries an unread notification, then what the
-	# activity row has no room for (the prompt while the agent works on it,
-	# the directory once the prompt took the activity row), then a notification
-	# already seen.
-	if (meta == "" && f[13] != "" && (f[12] == "1" || f[23] == "")) meta = f[13]
-	else if (meta == "" && f[23] != "") {
-		if (state == "running" || state == "waiting") meta = "❯ " f[23]
-		else meta = cwd_label(f[8])
-	}
+	# Otherwise the meta row carries what the activity row has no room for:
+	# the prompt while the agent works on it, the directory once the prompt or
+	# the empty-session marker took the activity row. The last notification
+	# is only a fallback (unread already shows as the dot).
+	if (meta == "" && f[24] != "" && !idle) meta = "❯ " f[24]
+	else if (meta == "" && (f[24] != "" || empty)) meta = cwd_label(f[8])
+	else if (meta == "") meta = f[13]
 	meta = trim(width - 2, meta)
 
 	# Heavy border for the active window, light grey for the others.
@@ -229,7 +241,9 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	if (active == "1" && state == "waiting") title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
 	else if (state == "waiting") title_style = "color"
-	row_style = (state == "waiting") ? "color" : ""
+	# Waiting rows take the wait color; an empty session reads dim grey.
+	row_style = (state == "waiting" || empty) ? "color" : ""
+	row_color = empty ? "#808080" : wait_color
 
 	# Unread: a red dot replaces the second-to-last character of the top
 	# border, unless the title fills the row (the meta row still shows the
@@ -248,16 +262,16 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 	out = out bs v be
 	if (glyph != "") {
-		if (row_style == "color") out = out color_start(wait_color) glyph RESET
+		if (row_style == "color") out = out color_start(row_color) glyph RESET
 		else if (gcolor != "") out = out color_start(gcolor) glyph RESET
 		else out = out glyph
-		if (activity != "") out = out " " with_style(row_style, wait_color, activity)
+		if (activity != "") out = out " " with_style(row_style, row_color, activity)
 	} else {
-		out = out " " with_style(row_style, wait_color, activity)
+		out = out " " with_style(row_style, row_color, activity)
 	}
 	out = out EL "\n"
 
-	return out bs v " " be with_style(row_style, wait_color, meta) EL "\n"
+	return out bs v " " be with_style(row_style, row_color, meta) EL "\n"
 }
 '
 
@@ -315,7 +329,7 @@ END {
 	out = ""
 	for (i = 1; i <= n; i++) {
 		nf = split(line[i], f, "|")
-		for (j = 24; j <= nf; j++) f[23] = f[23] "|" f[j]
+		for (j = 25; j <= nf; j++) f[24] = f[24] "|" f[j]
 		if (mode == "frame") {
 			f[4] = (f[2] == active_id) ? "1" : "0"
 			f[3] = f[1] ":" f[3]
@@ -329,8 +343,8 @@ END {
 
 # Usage: render_rows WIDTH FRAME NERD WAIT_COLOR [SELECTED_WINDOW_ID] [NOW]
 # SELECTED_WINDOW_ID marks the keyboard selection; empty means none. Fields
-# 18-20 of each input line are ignored; 21-23 are the finish time, window
-# activity time and last prompt as in render_frame. NOW (epoch seconds) is
+# 18-20 of each input line are ignored; 21-24 are the finish time, window
+# activity time, session source and last prompt as in render_frame. NOW (epoch seconds) is
 # what finish times are measured against; empty means no ages are shown.
 render_rows() {
 	# Not $(...): render_supports_color checks whether stdout is a terminal.
@@ -344,8 +358,8 @@ render_rows() {
 # Reads "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION|NOW" followed by the list-panes
 # -a dump (window fields 1-17, @orchestra_selected_window, the sidebar-focused
 # flag and the Claude pane flag as fields 18-20, then @ab_finished_at,
-# window_activity and @ab_last_prompt as 21-23; the prompt comes last since
-# it may itself contain "|") and renders one
+# window_activity, @ab_session_source and @ab_last_prompt as 21-24; the
+# prompt comes last since it may itself contain "|") and renders one
 # "session:window" block per window that has a Claude pane, or a placeholder
 # line when there is none. A non-numeric WIDTH falls back to 32.
 render_frame() {

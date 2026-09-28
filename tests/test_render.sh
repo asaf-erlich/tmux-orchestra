@@ -167,7 +167,7 @@ check_cwd_label() {
     }
 }
 check_cwd_label '/tmp/project' 'project'
-check_cwd_label '/tmp/abcdefghijklmnopq' 'bcdefghijklmnopq'
+check_cwd_label '/tmp/abcdefghijklmnopq' 'abcdefghijklmnopq'
 check_cwd_label '/' '/'
 
 check_spinner() {

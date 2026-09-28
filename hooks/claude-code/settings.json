@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra set-prompt \"$(jq -r '.prompt' <<< \"$CLAUDE_HOOK_INPUT\")\" && orchestra set-state running --spinner claude --action thinking || true"
+            "command": "orchestra-claude-hook prompt"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra set-state running --spinner claude --action \"$(jq -r '.tool_name + \": \" + (.tool_input | tostring | .[0:100])' <<< \"$CLAUDE_HOOK_INPUT\")\""
+            "command": "orchestra-claude-hook pre-tool"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra set-state waiting --action \"$(jq -r '.message // \"waiting for input\"' <<< \"$CLAUDE_HOOK_INPUT\")\" && orchestra notify --title \"Claude Code\" --body \"waiting for input\""
+            "command": "orchestra-claude-hook notification"
           }
         ]
       }
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra set-state done && orchestra clear-state"
+            "command": "orchestra-claude-hook stop"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra clear-state"
+            "command": "orchestra-claude-hook session-start"
           }
         ]
       }
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "orchestra clear-state"
+            "command": "orchestra-claude-hook session-end"
           }
         ]
       }

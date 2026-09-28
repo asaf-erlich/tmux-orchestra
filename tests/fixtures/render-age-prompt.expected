@@ -16,3 +16,15 @@
 ┌─ seen ────────────────────────────────
 │· Read: a.md
 │ ❯ summarize the docs
+┌─ fresh ────────────────────────── 2h ─
+│ ∅ cleared
+│ fresh
+┌─ old ──────────────────────────── 9d ─
+│ ∅ empty session
+│ old
+┌─ legacy ──────────────────────────────
+│ legacy  $ claude
+│ Claude Code: finished
+┌─ longdir ─────────────────────────────
+│ ❯ check the rollout
+│ platform-engineering-domain-and-a-muc…
