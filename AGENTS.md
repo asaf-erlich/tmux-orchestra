@@ -17,6 +17,7 @@ bin/
   orchestra-click       Map a sidebar click to select-window / switch-client
   orchestra-select      Move/confirm the sidebar keyboard selection
   orchestra-claude-hook Claude Code hook dispatcher (JSON on stdin) + backfill
+  orchestra-bg-refresh  Poll `claude agents --json` into @orchestra_bg_agents
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
   select.sh             Claude-window filter, keyboard selection, click mapping
@@ -31,6 +32,7 @@ hooks/
 tests/
   test_cli.sh           Integration tests (spins up isolated tmux server)
   test_render.sh        Fixture-based render regression tests
+  test_select.sh        Click/selection mapping against a stub tmux function
   fixtures/             Pipe-delimited input + .expected output pairs
 spec/
   implementation-spec.md  Authoritative design reference
@@ -71,7 +73,11 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 | `@orchestra_sidebar_width` | orchestra-toggle, after-resize-pane hook | — | Global: cached pane width |
 | `@orchestra_sidebar_pane_id` | orchestra-toggle | — | Global: the sidebar pane ID |
 | `@orchestra_sidebar_pid` | orchestra-toggle | — | Global: renderer PID |
-| `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (window_id); unset = the viewing session's active window |
+| `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (window_id, or `bg:<id>` for a background session); unset = the viewing session's active window |
+| `@orchestra_bg_agents` | orchestra-bg-refresh | — | Global: background Claude sessions, `id;state;started_at;cwd;name` records joined by `\|`; unset when none |
+| `@orchestra_bg_id` | window opened by `select_bg_open` | — | Window: the background session id this window runs `claude attach` for |
+| `@orchestra_background` | user | — | Global: `off` hides background sessions |
+| `@orchestra_bg_interval` | user / orchestra.tmux | — | Global: background refresh period in seconds (default 10, 0 disables); read when the renderer starts |
 
 Earlier versions kept per-session `@ab_width`, `@ab_sidebar_pane_id`, `@ab_sidebar_pid` and `@ab_selected_window`; `orchestra.tmux` closes those sidebars and unsets the options on load.
 
@@ -105,6 +111,7 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 - Idle windows show the finish age (`now`, `5m`, `3h`, `2d`, `6w`; from `@ab_finished_at`, else `window_activity`) at the right of the top border: bold under an hour, grey past a day, hidden while running. The last prompt (`❯ …`) takes the activity row when idle and the meta row while running or waiting; an idle window with `@ab_session_source` and no prompt shows a dim `∅ cleared` / `∅ empty session`. The last notification is only a meta-row fallback.
 - Windows from every session are listed, in session-name then window-index order, titled `session:window`; only the sidebar's own session's active window is drawn active. Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
+- Background sessions: `claude agents --json` starts a node process, so it never runs on the tick. `orchestra-render` starts `orchestra-bg-refresh` as a background job every `@orchestra_bg_interval` seconds (one at a time); it writes `@orchestra_bg_agents` only when the list changed and then sends SIGUSR1. The tick reads the option as a last `|bg|REC|...` line of the same tmux call. `render_frame` draws a one-line `── background ──` separator and one 3-line `bg_block` per session after the windows (after the one-line placeholder when there are none); `select_row` uses the same geometry, and `select_go` on a `bg:<id>` pick calls `select_bg_open`, which selects the window tagged `@orchestra_bg_id=<id>` or opens a new one running `claude attach <id>`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
 ## Testing

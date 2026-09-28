@@ -13,6 +13,7 @@ set_default() {
 }
 set_default @orchestra_nerd_fonts off
 set_default @orchestra_wait_color '#d29922'
+set_default @orchestra_bg_interval 10
 set_default @orchestra_key B
 set_default @orchestra_width 32
 

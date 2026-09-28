@@ -14,6 +14,7 @@ session_name=$2
 
 # Each window block rendered by window_block (lib/render.sh) is exactly 3 lines tall
 # (top border, detail row, meta row). The sidebar lists only Claude windows,
-# from every session, so the block index counts into the same filtered list
-# (lib/select.sh).
-select_row "$session_name" $((mouse_y / 3))
+# from every session, then a separator line and the background sessions;
+# select_row (lib/select.sh) maps the line onto the same filtered list, and
+# a background session opens in a window running `claude attach`.
+select_row "$session_name" "$mouse_y"

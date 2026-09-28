@@ -28,7 +28,10 @@ ORCHESTRA_CLAUDE_PANE='#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_co
 # viewing session: its active window is "active", and its most recently
 # active client is the one Enter and clicks switch. One tmux call. Sets:
 #   _sel_windows        one "window_id|active|session_id" line per listed
-#                       (Claude) window, in sidebar order
+#                       (Claude) window, in sidebar order, then one
+#                       "bg:<id>|0|" line per background session
+#   _sel_nwin           the number of listed windows (not background sessions)
+#   _sel_bg             @orchestra_bg_agents ("id;state;started;cwd;name|...")
 #   _sel_stored         @orchestra_selected_window
 #   _sel_view_session   the viewing session's id
 #   _sel_client         the client to switch, or empty if none is attached
@@ -37,7 +40,8 @@ ORCHESTRA_CLAUDE_PANE='#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_co
 select_windows() {
 	_sel_out=$(tmux display-message -p -t "$1" '#{session_id}|#{@orchestra_sidebar_pid}|#{@orchestra_selected_window}' \; \
 		list-panes -a -F "#{window_id}|#{window_active}|$ORCHESTRA_CLAUDE_PANE|#{session_id}" \; \
-		list-clients -t "$1" -F '>#{client_activity}|#{client_name}' 2>/dev/null) || return 1
+		list-clients -t "$1" -F '>#{client_activity}|#{client_name}' \; \
+		display-message -p -t "$1" '|bg|#{@orchestra_bg_agents}' 2>/dev/null) || return 1
 	[ -n "$_sel_out" ] || return 1
 	_sel_windows=''
 	_sel_last=''
@@ -45,11 +49,15 @@ select_windows() {
 	_sel_client=''
 	_sel_client_act=-1
 	_sel_view_session=''
+	_sel_nwin=0
+	_sel_bg=''
 	SELECT_SIDEBAR_PID=''
 	# The header line (session ids start with $), then pane lines (window ids
 	# start with @), then client lines (prefixed >). Panes of one window are
 	# consecutive, so a window is kept once, on its first Claude pane; a
-	# window linked into several sessions is listed under the first.
+	# window linked into several sessions is listed under the first. The last
+	# line, "|bg|...", carries the background sessions (session ids are never
+	# empty).
 	while IFS="|" read -r _sel_a _sel_b _sel_c _sel_d; do
 		case "$_sel_a" in
 			@*)
@@ -61,6 +69,7 @@ select_windows() {
 				[ "$_sel_d" = "$_sel_view_session" ] || _sel_b=0
 				_sel_windows="$_sel_windows$_sel_a|$_sel_b|$_sel_d
 "
+				_sel_nwin=$((_sel_nwin + 1))
 				;;
 			'>'*)
 				_sel_a=${_sel_a#>}
@@ -69,6 +78,11 @@ select_windows() {
 					_sel_client_act=$_sel_a
 					_sel_client=$_sel_b
 				fi
+				;;
+			'')
+				[ "$_sel_b" = 'bg' ] || continue
+				_sel_bg=$_sel_c
+				[ -z "$_sel_d" ] || _sel_bg="$_sel_bg|$_sel_d"
 				;;
 			*)
 				[ -z "$_sel_view_session" ] || continue
@@ -81,6 +95,17 @@ select_windows() {
 $_sel_out
 EOF
 	[ -n "$_sel_view_session" ] || return 1
+	_sel_rest=$_sel_bg
+	while [ -n "$_sel_rest" ]; do
+		_sel_rec=${_sel_rest%%|*}
+		case "$_sel_rest" in
+			*'|'*) _sel_rest=${_sel_rest#*|} ;;
+			*) _sel_rest='' ;;
+		esac
+		[ -n "$_sel_rec" ] || continue
+		_sel_windows="${_sel_windows}bg:${_sel_rec%%;*}|0|
+"
+	done
 }
 
 # Usage: select_pick N
@@ -105,11 +130,17 @@ EOF
 
 # Usage: select_go
 # Clears the selection and shows _sel_pick on the viewing client. One tmux
-# call. A window in the viewing session is selected; for a window in another
+# call (a background session: see select_bg_open). A window in the viewing session is selected; for a window in another
 # session the viewing client (_sel_client, always named: from run-shell or a
 # background process the "current client" is ambiguous) is switched to it.
 # The client-session-changed and pane-focus-in hooks then move the sidebar.
 select_go() {
+	case "$_sel_pick" in
+		bg:*)
+			select_bg_open "${_sel_pick#bg:}"
+			return 0
+			;;
+	esac
 	if [ "$_sel_pick_session" = "$_sel_view_session" ] || [ -z "$_sel_client" ]; then
 		tmux set-option -gqu @orchestra_selected_window \; select-window -t "$_sel_pick" >/dev/null 2>&1 || true
 	else
@@ -161,12 +192,82 @@ EOF
 	fi
 }
 
-# Usage: select_row TARGET ROW
-# Shows the listed window at 0-based sidebar block ROW (a click), as Enter
-# does. Out of range is a no-op. Two tmux calls.
+# Usage: select_bg_open ID
+# Shows background session ID (from _sel_bg) on the viewing client: the
+# window already attached to it (@orchestra_bg_id), else a new window in the
+# viewing session, in the session's directory and named after it, running
+# `claude attach ID`. The window tags itself with @orchestra_bg_id, which
+# bin/orchestra-bg-refresh reads to drop the session from the background
+# list while it is attached; the window closes when you detach. Two tmux
+# calls.
+select_bg_open() {
+	case "$1" in '' | *[!0-9A-Za-z_-]*) return 0 ;; esac
+	_sel_cwd=''
+	_sel_name=$1
+	_sel_rest=$_sel_bg
+	while [ -n "$_sel_rest" ]; do
+		_sel_rec=${_sel_rest%%|*}
+		case "$_sel_rest" in
+			*'|'*) _sel_rest=${_sel_rest#*|} ;;
+			*) _sel_rest='' ;;
+		esac
+		[ "${_sel_rec%%;*}" = "$1" ] || continue
+		# id;state;started;cwd;name
+		_sel_rec=${_sel_rec#*;}
+		_sel_rec=${_sel_rec#*;}
+		_sel_rec=${_sel_rec#*;}
+		_sel_cwd=${_sel_rec%%;*}
+		case "$_sel_rec" in *';'*) _sel_name=${_sel_rec#*;} ;; esac
+		[ -n "$_sel_name" ] || _sel_name=$1
+		break
+	done
+	[ -n "$_sel_cwd" ] && [ -d "$_sel_cwd" ] || _sel_cwd=$HOME
+
+	_sel_attached=$(tmux list-windows -a -F '#{@orchestra_bg_id}|#{window_id}' 2>/dev/null) || _sel_attached=''
+	while IFS='|' read -r _sel_a _sel_b; do
+		[ "$_sel_a" = "$1" ] || continue
+		# Already attached: show it like any other window (switch-client
+		# resolves its session).
+		if [ -n "$_sel_client" ]; then
+			tmux set-option -gqu @orchestra_selected_window \; \
+				switch-client -c "$_sel_client" -t "$_sel_b" \; \
+				select-window -t "$_sel_b" >/dev/null 2>&1 || true
+		else
+			tmux set-option -gqu @orchestra_selected_window \; select-window -t "$_sel_b" >/dev/null 2>&1 || true
+		fi
+		return 0
+	done <<EOF
+$_sel_attached
+EOF
+
+	# If attach fails, the window stays open on the error until Enter.
+	tmux set-option -gqu @orchestra_selected_window \; \
+		new-window -t "$_sel_view_session:" -c "$_sel_cwd" -n "$_sel_name" \
+		"tmux set-option -wq -t \"\$TMUX_PANE\" @orchestra_bg_id $1; claude attach $1 || { printf '\\nclaude attach $1 failed. Enter closes this window. '; read -r _; }" \
+		>/dev/null 2>&1 || true
+}
+
+# Usage: select_row TARGET LINE
+# Shows what sits at 0-based sidebar LINE (a click), as Enter does: window
+# blocks are 3 lines each (or a 1-line placeholder when there are none),
+# then, when there are background sessions, a 1-line separator and a 3-line
+# block per session (lib/render.sh). The separator and out of range lines
+# are no-ops. Three tmux calls at most.
 select_row() {
 	select_windows "$1" || return 0
-	select_pick $(($2 + 1))
+	if [ "$_sel_nwin" -gt 0 ]; then
+		_sel_top=$((_sel_nwin * 3))
+	else
+		_sel_top=1
+	fi
+	if [ "$2" -lt "$_sel_top" ]; then
+		[ "$_sel_nwin" -gt 0 ] || return 0
+		select_pick $(($2 / 3 + 1))
+	else
+		_sel_line=$(($2 - _sel_top - 1))
+		[ "$_sel_line" -ge 0 ] || return 0
+		select_pick $((_sel_nwin + _sel_line / 3 + 1))
+	fi
 	[ -n "$_sel_pick" ] || return 0
 	select_go
 }

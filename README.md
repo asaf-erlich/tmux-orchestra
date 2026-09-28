@@ -16,6 +16,9 @@ Its a shameless rip-off of cmux, vibe-coded in a day. Its only saving grace is t
   windows running Claude Code in every session (`session:window`) and follows
   focus across windows and sessions; Enter or a click on a window in another
   session switches your client there
+- Background Claude Code sessions (`claude --bg`, `/background`, FleetView)
+  listed under a `background` separator; Enter or a click opens one in a new
+  window running `claude attach <id>`
 - Bash and zsh prompt hooks for `cwd` / `branch` / last command
 - Claude Code hook template (working), OpenCode plugin (working), Codex stub
 - Shellcheck-clean shell implementation with tests under `make test`
@@ -98,6 +101,24 @@ cp ~/.claude/settings.json ~/.claude/settings.json.bak
 ```
 
 Requires `jq` for JSON hook parsing.
+
+#### Background sessions
+
+Sessions the Claude Code daemon runs (`claude --bg`, sent to the background
+from an interactive session, or launched from FleetView) run in no tmux
+pane, so the hooks above never see them. The sidebar lists them after its
+windows, below a `── background ──` separator, from `claude agents --json`
+(needs `claude` and `jq` on the tmux server's `PATH`). Enter or a click on
+one opens a new window in the viewing session, in the session's directory,
+running `claude attach <id>`; while that window is open the session shows as
+a normal window instead, and detaching closes the window.
+
+The list is refreshed in the background every `@orchestra_bg_interval`
+seconds (default 10; read when the sidebar opens). To turn it off:
+
+```sh
+set -g @orchestra_background off   # or: set -g @orchestra_bg_interval 0
+```
 
 ### OpenCode
 

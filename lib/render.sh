@@ -273,6 +273,46 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 	return out bs v " " be with_style(row_style, row_color, meta) EL "\n"
 }
+
+# The one-line rule between the windows and the background sessions.
+# Counted by hand: awk length() may count bytes, and "─" is three.
+function bg_separator(width) {
+	if (width < 14) return with_style("color", "#808080", repeat("─", width)) EL "\n"
+	return with_style("color", "#808080", "── background " repeat("─", width - 14)) EL "\n"
+}
+
+# One background session (`claude agents` kind "background", recorded by
+# bin/orchestra-bg-refresh in @orchestra_bg_agents) as a window_block. rec is
+# "id;state;started_at;cwd;name" (the refresh strips ";" and "|" from the
+# fields). The block id is "bg:<id>", which is also how the keyboard
+# selection names it.
+function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id) {
+	split(rec, r, ";")
+	id = r[1]
+	for (g = 1; g <= 24; g++) g_f[g] = ""
+	g_f[2] = "bg:" id
+	g_f[3] = (r[5] != "") ? r[5] : id
+	g_f[4] = "0"
+	g_f[8] = r[4]
+	g_f[17] = "claude"
+	st = r[2]
+	if (st == "blocked" || st == "waiting" || st == "needs_input") {
+		g_f[5] = "waiting"; g_f[6] = "needs input"
+	} else if (st == "running" || st == "working" || st == "busy") {
+		g_f[5] = "running"; g_f[6] = "working"
+	} else if (st == "done" || st == "idle") {
+		g_f[5] = "done"
+	}
+	# Idle blocks show the directory on the activity row; the meta row names
+	# the session to attach to (and a state this does not know). The age is
+	# measured from the start: the daemon does not record when a turn
+	# finished.
+	g_f[13] = "bg " id
+	if (g_f[5] == "running" || g_f[5] == "waiting") g_f[13] = g_f[13] "  " cwd_label(r[4])
+	else if (g_f[5] == "" && st != "") g_f[13] = g_f[13] "  " st
+	g_f[22] = r[3]
+	return window_block(g_f, width, frame, nerd, wait_color, selected)
+}
 '
 
 # Main program. mode=rows: every input line is a window; width, nerd,
@@ -289,6 +329,12 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 _RENDER_AWK_MAIN='
 BEGIN { FS = "|" }
 mode == "frame" && NR == 1 { width = $1; nerd = $2; wait_color = $3; view = $4; now = $5; next }
+# "|bg|REC|REC..." (session names are never empty): @orchestra_bg_agents,
+# one record per background session, drawn after the windows.
+mode == "frame" && $1 == "" && $2 == "bg" {
+	for (i = 3; i <= NF; i++) if ($i != "") { nb++; bg[nb] = $i }
+	next
+}
 $2 == "" { next }
 mode != "frame" { n++; line[n] = $0; next }
 {
@@ -317,6 +363,10 @@ END {
 		# An empty NOW is the live path: POSIX srand() returns the previous
 		# seed, which srand() with no argument set to the time of day.
 		if (now == "") { srand(); now = srand() }
+		for (i = 1; i <= nb; i++) {
+			split(bg[i], r, ";")
+			if ("bg:" r[1] == s) valid = 1
+		}
 		# Show the selection while focused, falling back to the active window
 		# (or the first listed one when the active window is not listed) when
 		# the stored id is unset or stale. Unfocused, show it only if it points
@@ -337,6 +387,15 @@ END {
 		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && f[2] == sel)
 	}
 	if (mode == "frame" && n == 0) out = " " trim(width - 1, "no claude sessions") EL "\n"
+	# Background sessions: one separator line, then 3-line blocks (select_row
+	# in lib/select.sh maps clicks with the same geometry).
+	if (nb > 0) {
+		out = out bg_separator(width)
+		for (i = 1; i <= nb; i++) {
+			split(bg[i], r, ";")
+			out = out bg_block(bg[i], width, frame, nerd, wait_color, sel != "" && "bg:" r[1] == sel)
+		}
+	}
 	printf "%s", out
 }
 '
@@ -361,7 +420,9 @@ render_rows() {
 # window_activity, @ab_session_source and @ab_last_prompt as 21-24; the
 # prompt comes last since it may itself contain "|") and renders one
 # "session:window" block per window that has a Claude pane, or a placeholder
-# line when there is none. A non-numeric WIDTH falls back to 32.
+# line when there is none. A non-numeric WIDTH falls back to 32. An optional
+# "|bg|REC|..." line (@orchestra_bg_agents) adds a separator and one block per
+# background session after the windows.
 render_frame() {
 	_render_color=0
 	render_supports_color && _render_color=1

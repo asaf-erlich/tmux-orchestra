@@ -119,6 +119,30 @@ check_sessions() {
 }
 check_sessions
 
+# Background sessions (@orchestra_bg_agents, the "|bg|..." line): a separator
+# after the windows, then one 3-line block each, named after the session,
+# with the daemon state mapped onto running/waiting/done and an unknown one
+# shown as text. The keyboard selection can point at one ("bg:<id>"). With
+# no windows the placeholder line comes first.
+check_background() {
+    actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-background.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-background.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame background mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    actual=$(printf '%s\n' '40|off||dev|1800000000' '|bg|a1;done;;/x;job' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '1,3p')
+    expected_text=$(printf '%s\n' ' no claude sessions' '── background ──────────────────────────' '┌─ job ─────────────────────────────────')
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame background placeholder mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    # An empty "|bg|" line draws nothing.
+    actual=$(printf '%s\n' '40|off||dev|1800000000' 'dev|@1|build|1|||||||||||||||0|1|||' '|bg|' | NO_COLOR=1 TERM=xterm render_frame 0 | wc -l | tr -d ' ')
+    [ "$actual" = 3 ] || { printf 'render_frame empty background drew %s lines\n' "$actual" >&2; exit 1; }
+}
+check_background
+
 check_inactive_border_color() {
     tmp_output=$(mktemp "${TMPDIR:-/tmp}/orchestra-render.XXXXXX")
     trap 'rm -f "$tmp_output"' EXIT INT TERM
@@ -188,3 +212,4 @@ check_spinner opencode 1 '⢞⡳'
 check_spinner opencode 4 '⢾⡱'
 check_spinner opencode 5 '⠰⠆'
 check_spinner opencode 8 '⢎⡱'
+
