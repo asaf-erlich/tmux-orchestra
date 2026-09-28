@@ -7,10 +7,14 @@ CURRENT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
 tmux set-option -gq focus-events on
 tmux set-option -gq mouse on
-tmux set-option -gq @orchestra_nerd_fonts off
-tmux set-option -gq @orchestra_wait_color '#d29922'
-tmux set-option -gq @orchestra_key B
-tmux set-option -gq @orchestra_width 32
+# Defaults only: a value set in tmux.conf before this file runs wins.
+set_default() {
+    [ -n "$(tmux show-option -gqv "$1")" ] || tmux set-option -gq "$1" "$2"
+}
+set_default @orchestra_nerd_fonts off
+set_default @orchestra_wait_color '#d29922'
+set_default @orchestra_key B
+set_default @orchestra_width 32
 
 tmux set-option -ga update-environment 'ORCHESTRA'
 tmux set-option -ga update-environment 'ORCHESTRA_WINDOW_ID'
