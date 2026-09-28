@@ -34,6 +34,7 @@ ab_option_max() {
         @ab_progress_label) printf '%s' 60 ;;
         @ab_last_notification) printf '%s' 120 ;;
         @ab_last_cmd) printf '%s' 80 ;;
+        @ab_last_prompt) printf '%s' 120 ;;
         @ab_last_exit) printf '%s' 32 ;;
         @ab_status_*__icon) printf '%s' 1 ;;
         @ab_status_*__color) printf '%s' 32 ;;

@@ -14,7 +14,8 @@ usage() {
   orchestra clear-progress [--window ID]
   orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID]
   orchestra set-state <running|waiting|done> [--action TEXT] [--window ID]
-  orchestra clear-state [--window ID]"
+  orchestra clear-state [--window ID]
+  orchestra set-prompt <text> [--window ID]"
 }
 
 parse_target_flags() {
@@ -231,7 +232,20 @@ cmd_set_state() {
     esac
 
     target=$(resolve_window "$win")
+    # @ab_finished_at records when the agent last stopped and handed control
+    # back: every "done", and a "waiting" that interrupts a running turn (a
+    # permission prompt). A "waiting" after the turn already ended (Claude's
+    # idle reminder) keeps the earlier time.
+    stamp=''
+    if [ "$state" = 'done' ]; then
+        stamp=1
+    elif [ "$state" = 'waiting' ] && [ "$(get_opt "$target" '@ab_agent_state')" = 'running' ]; then
+        stamp=1
+    fi
     set_opt "$target" '@ab_agent_state' "$state" || ab_tmux_fail 'failed to write agent state'
+    if [ -n "$stamp" ]; then
+        set_opt "$target" '@ab_finished_at' "$(date +%s)" || ab_tmux_fail 'failed to write finish time'
+    fi
     if [ -n "$action" ]; then
         set_opt "$target" '@ab_current_action' "$action" || ab_tmux_fail 'failed to write current action'
     else
@@ -262,6 +276,31 @@ cmd_clear_state() {
     clear_opt "$target" '@ab_spinner' || ab_tmux_fail 'failed to clear spinner'
 }
 
+# The last prompt the user sent the agent, shown while the window is idle.
+# It outlives clear-state so an idle window still says what it was asked.
+cmd_set_prompt() {
+    [ $# -ge 1 ] || usage
+    prompt=$1
+    shift
+    win=''
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --) shift; break ;;
+            -*) ab_usage "unknown flag: $1" ;;
+            *) break ;;
+        esac
+    done
+    [ $# -eq 0 ] || usage
+
+    target=$(resolve_window "$win")
+    if [ -n "$prompt" ]; then
+        set_opt "$target" '@ab_last_prompt' "$prompt" || ab_tmux_fail 'failed to write prompt'
+    else
+        clear_opt "$target" '@ab_last_prompt' || ab_tmux_fail 'failed to clear prompt'
+    fi
+}
+
 [ $# -gt 0 ] || usage
 subcommand=$1
 shift
@@ -275,5 +314,6 @@ case "$subcommand" in
     notify) cmd_notify "$@" ;;
     set-state) cmd_set_state "$@" ;;
     clear-state) cmd_clear_state "$@" ;;
+    set-prompt) cmd_set_prompt "$@" ;;
     *) usage ;;
 esac

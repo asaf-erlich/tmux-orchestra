@@ -157,6 +157,23 @@ assert_eq 'pytest' "$(tmux show-options -v -w -t "$window_id" @ab_current_action
 orchestra set-state 'done' --window "$window_id"
 assert_eq 'done' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state)" 'done state is written'
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_current_action 2>/dev/null || printf '')" 'done clears action'
+case "$(tmux show-options -v -w -t "$window_id" @ab_finished_at)" in
+    ''|*[!0-9]*) assert_eq 'epoch seconds' "$(tmux show-options -v -w -t "$window_id" @ab_finished_at)" 'done records @ab_finished_at' ;;
+esac
+# A waiting after the turn ended keeps the finish time; one that interrupts
+# a running turn records a new one.
+tmux set-option -wq -t "$window_id" @ab_finished_at 5
+orchestra set-state waiting --window "$window_id"
+assert_eq '5' "$(tmux show-options -v -w -t "$window_id" @ab_finished_at)" 'idle waiting keeps the finish time'
+orchestra set-state running --window "$window_id"
+orchestra set-state waiting --window "$window_id"
+if [ "$(tmux show-options -v -w -t "$window_id" @ab_finished_at)" = '5' ]; then
+    assert_eq 'a new time' '5' 'waiting during a turn records the finish time'
+fi
+orchestra set-state 'done' --window "$window_id"
+orchestra set-prompt 'fix the
+flaky | test' --window "$window_id"
+assert_eq 'fix the flaky | test' "$(tmux show-options -v -w -t "$window_id" @ab_last_prompt)" 'set-prompt stores the prompt on one line'
 orchestra clear-state --window "$window_id"
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" 'clear-state clears agent state'
 

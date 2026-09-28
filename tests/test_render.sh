@@ -24,6 +24,28 @@ compare_fixture "$REPO_DIR/tests/fixtures/render-unread.input" "$REPO_DIR/tests/
 # active window keeps its heavy border. Trailing input fields are ignored.
 compare_fixture "$REPO_DIR/tests/fixtures/render-selected.input" "$REPO_DIR/tests/fixtures/render-selected.expected" '@2'
 
+# Finish age and last prompt. With a NOW, idle windows show how long ago the
+# agent finished (@ab_finished_at, else the window's last output) at the
+# right of the top border; running windows do not. The last prompt takes the
+# idle activity row (pushing the directory to the meta row) and the meta row
+# of a working window, ahead of a notification already read; a "|" inside
+# it survives.
+check_age_prompt() {
+    actual=$(NO_COLOR=1 TERM=xterm render_rows 40 0 off '#d29922' '' 1800000000 <"$REPO_DIR/tests/fixtures/render-age-prompt.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-age-prompt.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render age/prompt mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    # render_frame takes NOW from the header's fifth field.
+    actual=$(printf '%s\n' '40|off||dev|1800000000' 'dev|@1|build|1|||||||||||||||0|1|1799999940||' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '1p')
+    if [ "$actual" != '┏━ dev:build ━━━━━━━━━━━━━━━━━━━━━━ 1m ━' ]; then
+        printf 'render_frame age mismatch\nactual: %s\n' "$actual" >&2
+        exit 1
+    fi
+}
+check_age_prompt
+
 # render_frame (the live path): width, nerd fonts and wait color come from a
 # header line, the selection from fields 18-19 and the Claude pane flag from
 # field 20; titles are "session:window". Unfocused (field 19 is 0) with @2

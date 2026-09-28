@@ -1,5 +1,15 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra set-prompt \"$(jq -r '.prompt' <<< \"$CLAUDE_HOOK_INPUT\")\" && orchestra set-state running --spinner claude --action thinking || true"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

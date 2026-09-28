@@ -53,6 +53,8 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 |---|---|---|---|
 | `@ab_agent_state` | harness hook | — | `running` \| `waiting` \| `done` \| empty |
 | `@ab_current_action` | harness hook | 120 chars | Tool name or prompt text |
+| `@ab_last_prompt` | `orchestra set-prompt` | 120 chars | Last prompt sent to the agent; survives `clear-state` |
+| `@ab_finished_at` | `orchestra set-state` | — | Epoch seconds of the last `done`, or of a `waiting` that interrupted `running` |
 | `@ab_status_<key>` | `orchestra set-status` | 40 chars | Arbitrary status pill value |
 | `@ab_status_<key>__icon` | `--icon` flag | 1 grapheme | Optional pill icon |
 | `@ab_status_<key>__color` | `--color` flag | 32 chars | `#rrggbb` or ANSI name |
@@ -84,6 +86,7 @@ orchestra clear-progress
 orchestra notify --title T [--body B] [--subtitle S] [--quiet]
 orchestra set-state <running|waiting|done> [--action TEXT]
 orchestra clear-state
+orchestra set-prompt <text>
 ```
 
 All subcommands accept `--window <id>` to target a specific window. Without it, window resolution falls through four steps (see `resolve_window` in [lib/common.sh](lib/common.sh)): explicit flag → `$TMUX_PANE` → `$ORCHESTRA_WINDOW_ID` → current window.
@@ -95,7 +98,9 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 - `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-panes -a -F '...'`, one line per pane of every session with a Claude flag), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
 - Do not add tmux calls inside `render_rows`/`render_frame` or the awk program — rendering must remain pure.
 - The pipe-delimited format read from tmux is:
-  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude`
+  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude|finished_at|window_activity|last_prompt`
+  `last_prompt` is last because it may contain `|`; the awk rejoins fields 23 onward.
+- Idle windows show the finish age (`now`, `5m`, `3h`, `2d`, `6w`; from `@ab_finished_at`, else `window_activity`) at the right of the top border: bold under an hour, grey past a day, hidden while running. The last prompt (`❯ …`) takes the activity row when idle and the meta row while running or waiting.
 - Windows from every session are listed, in session-name then window-index order, titled `session:window`; only the sidebar's own session's active window is drawn active. Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).

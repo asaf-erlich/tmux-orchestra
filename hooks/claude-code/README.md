@@ -9,6 +9,11 @@ not reappear when Claude starts again in that window. (The sidebar lists only
 windows whose panes are running Claude Code, so a window where Claude is gone
 is hidden regardless.)
 
+`UserPromptSubmit` stores the prompt with `orchestra set-prompt` so an idle
+window in the sidebar still shows what it was last asked, and marks the window
+running before the first tool call. `Stop` goes through `set-state done`,
+which records `@ab_finished_at`; the sidebar shows how long ago that was.
+
 ## Note about jq
 
 The template uses `jq` because Claude Code provides structured JSON hook input.

@@ -122,6 +122,7 @@ orchestra set-progress 0.42 --label 'Tests'
 orchestra set-state running --action 'pytest'
 orchestra notify --title 'Build' --body 'done'
 orchestra clear-state
+orchestra set-prompt 'fix the flaky test'
 ```
 
 ## Testing
