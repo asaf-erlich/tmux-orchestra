@@ -10,6 +10,8 @@ Its a shameless rip-off of cmux, vibe-coded in a day. Its only saving grace is t
 
 ## What this fork adds
 
+![Sidebar (left) listing Claude windows from every session, with a background session below the separator](media/fork-demo.png)
+
 This is a fork of
 [gauravmm/tmux-orchestra](https://github.com/gauravmm/tmux-orchestra). Compared
 with upstream, it:
