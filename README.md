@@ -8,11 +8,38 @@ that state in a dedicated sidebar pane.
 
 Its a shameless rip-off of cmux, vibe-coded in a day. Its only saving grace is that it is super handy. And has mouse support.
 
+## What this fork adds
+
+This is a fork of
+[gauravmm/tmux-orchestra](https://github.com/gauravmm/tmux-orchestra). Compared
+with upstream, it:
+
+- lists **background Claude Code sessions** (`claude --bg`, FleetView) under a
+  separator, and opens one in a new window with `claude attach` on Enter or a
+  click
+- keeps **one sidebar per tmux server**, listing Claude windows from every
+  session and switching your client on Enter or a click
+- lists **only windows running Claude Code**, so stale state never shows
+- adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
+- shows each window's **finish age**, **last prompt** and an
+  **empty-session** marker
+- redraws about **9x faster** (one tmux call and one awk pass per frame)
+- fixes a **focus loop** that could crash the terminal, a sidebar that got
+  stuck after its pane closed, and tmux.conf options being overwritten
+
+See [CHANGELOG.md](CHANGELOG.md) for details.
+
 ## Highlights
 
 - TPM-installable plugin entrypoint via `orchestra.tmux`
 - `orchestra` CLI for status pills, progress, notifications, and agent state
-- Long-lived `orchestra-render` sidebar pane that follows focus across windows
+- One long-lived `orchestra-render` sidebar per tmux server that lists the
+  windows running Claude Code in every session (`session:window`) and follows
+  focus across windows and sessions; Enter or a click on a window in another
+  session switches your client there
+- Background Claude Code sessions (`claude --bg`, `/background`, FleetView)
+  listed under a `background` separator; Enter or a click opens one in a new
+  window running `claude attach <id>`
 - Bash and zsh prompt hooks for `cwd` / `branch` / last command
 - Claude Code hook template (working), OpenCode plugin (working), Codex stub
 - Shellcheck-clean shell implementation with tests under `make test`
@@ -56,7 +83,8 @@ run '~/.tmux/plugins/tpm/tpm'
    ```
 
 3. Install the plugin with `prefix + I` (capital i).
-4. Toggle the sidebar with `prefix + B`.
+4. Toggle the sidebar with `prefix + B`. There is one sidebar for the whole
+   tmux server; it moves to whichever window (in whichever session) you focus.
 5. *(Optional)* If your terminal has a Nerd-Font-patched font, enable nicer
    glyphs (braille spinners, `` branch, `●` unread dot, etc.):
 
@@ -95,6 +123,24 @@ cp ~/.claude/settings.json ~/.claude/settings.json.bak
 
 Requires `jq` for JSON hook parsing.
 
+#### Background sessions
+
+Sessions the Claude Code daemon runs (`claude --bg`, sent to the background
+from an interactive session, or launched from FleetView) run in no tmux
+pane, so the hooks above never see them. The sidebar lists them after its
+windows, below a `── background ──` separator, from `claude agents --json`
+(needs `claude` and `jq` on the tmux server's `PATH`). Enter or a click on
+one opens a new window in the viewing session, in the session's directory,
+running `claude attach <id>`; while that window is open the session shows as
+a normal window instead, and detaching closes the window.
+
+The list is refreshed in the background every `@orchestra_bg_interval`
+seconds (default 10; read when the sidebar opens). To turn it off:
+
+```sh
+set -g @orchestra_background off   # or: set -g @orchestra_bg_interval 0
+```
+
 ### OpenCode
 
 Copy the plugin to OpenCode's global plugins directory:
@@ -118,6 +164,7 @@ orchestra set-progress 0.42 --label 'Tests'
 orchestra set-state running --action 'pytest'
 orchestra notify --title 'Build' --body 'done'
 orchestra clear-state
+orchestra set-prompt 'fix the flaky test'
 ```
 
 ## Testing
@@ -131,7 +178,7 @@ make test
 ## Key implementation decisions
 
 - **Polling renderer, hook-assisted wakeups:** tmux does not emit hooks for
-  arbitrary user-option writes, so the renderer uses a single `list-windows`
+  arbitrary user-option writes, so the renderer uses a single `list-panes`
   poll every 125 ms and lets hooks wake it early on focus and rename events.
 - **tmux options as the only datastore:** every state update is written into
   tmux options to keep the plugin installable without files, sockets, or extra

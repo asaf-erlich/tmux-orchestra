@@ -34,6 +34,7 @@ ab_option_max() {
         @ab_progress_label) printf '%s' 60 ;;
         @ab_last_notification) printf '%s' 120 ;;
         @ab_last_cmd) printf '%s' 80 ;;
+        @ab_last_prompt) printf '%s' 120 ;;
         @ab_last_exit) printf '%s' 32 ;;
         @ab_status_*__icon) printf '%s' 1 ;;
         @ab_status_*__color) printf '%s' 32 ;;
@@ -140,11 +141,15 @@ resolve_session() {
 }
 
 window_exists() {
-    tmux display-message -p -t "$1" '#{window_id}' >/dev/null 2>&1
+    # display-message can exit 0 with empty output for a target that no longer
+    # exists, so treat an empty result as missing.
+    [ -n "$(tmux display-message -p -t "$1" '#{window_id}' 2>/dev/null)" ]
 }
 
 pane_exists() {
-    tmux display-message -p -t "$1" '#{pane_id}' >/dev/null 2>&1
+    # display-message can exit 0 with empty output for a target that no longer
+    # exists, so treat an empty result as missing.
+    [ -n "$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null)" ]
 }
 
 sanitize_status_key() {

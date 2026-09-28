@@ -4,39 +4,161 @@ set -eu
 ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 # shellcheck disable=SC1091
 . "$ORCHESTRA_LIB/render.sh"
+# shellcheck disable=SC1091
+. "$ORCHESTRA_LIB/select.sh"
+
+# Process creation can be very slow (endpoint security scans every exec), so
+# a tick costs exactly one tmux call and one awk, and a keypress burst two
+# tmux calls in the reader plus the redraw it triggers.
+
+# The reader sends SIGUSR1 after a key and hooks send it after state
+# changes. A signal that arrives while redraw is running would otherwise be
+# absorbed and the next full sleep would delay the update, so remember it.
+nudged=0
+trap 'nudged=1' USR1
 
 sleep_interruptible() {
-    duration=$1
-    trap ':' USR1
-    sleep "$duration" &
+    [ "$nudged" = 0 ] || return 0
+    sleep "$1" &
     sleep_pid=$!
+    wait "$sleep_pid" 2>/dev/null || true
+    kill "$sleep_pid" 2>/dev/null || true
+    # Reap the killed sleep here, with stderr silenced. Otherwise bash (macOS
+    # /bin/sh) reports "Terminated: 15 sleep" on the pane's tty the next time
+    # it checks job status, and the message flashes in the sidebar until the
+    # next redraw.
     wait "$sleep_pid" 2>/dev/null || true
 }
 
 redraw() {
-    width=$(tput cols 2>/dev/null || printf '32')
-    case "$width" in
-        ''|*[!0-9]*) width=32 ;;
-    esac
-
-    if tmux_line_dump=$(tmux list-windows -F '#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}' 2>/dev/null); then
+    # One tmux call: the sidebar pane's own width (tput cols inside $(...)
+    # sees no terminal and reports 80), the two global options and the
+    # sidebar's session (whose active window is the one the viewing client
+    # shows), then one line per pane of every session. Fields 18-20 carry
+    # @orchestra_selected_window, whether the sidebar has focus (it is the
+    # active pane of the active window) and whether the pane runs Claude Code
+    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); fields 21-24 carry the finish
+    # time, the window's last output time, the session source and the last
+    # prompt (last, as it may contain "|"). The last line, "|bg|...", is
+    # @orchestra_bg_agents. render_frame shows one block per window with a
+    # Claude pane, then the background sessions.
+    if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}' \; \
+        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{@ab_last_prompt}" \; \
+        display-message -p '|bg|#{@orchestra_bg_agents}' 2>/dev/null); then
         :
     else
-        tmux_line_dump=''
+        frame_dump=''
     fi
 
-    nerd_fonts=$(tmux show-options -gvq @orchestra_nerd_fonts 2>/dev/null || printf 'off')
-    wait_color=$(tmux show-options -gvq @orchestra_wait_color 2>/dev/null || printf '#d29922')
     printf '\033[H'
-    printf '%s\n' "$tmux_line_dump" | render_rows "$width" "${FRAME_INDEX:-0}" "$nerd_fonts" "$wait_color"
+    printf '%s\n' "$frame_dump" | render_frame "${FRAME_INDEX:-0}"
     printf '\033[J'
 }
 
-trap 'printf "\033[?1049l"' EXIT
-printf '\033[?1049h'
+# Keyboard selection. A background reader blocks on the tty (no work while
+# idle), folds every key in one read into a net movement, applies it with
+# select_move (lib/select.sh) and nudges this process with SIGUSR1. The mouse
+# wheel arrives as cursor keys once the alternate screen is active, so it
+# moves the selection too.
+handle_keys() {
+    renderer_pid=$1
+    esc=$(printf '\033')
+    cr=$(printf '\r')
+    nl='
+'
+    while :; do
+        # min 1 time 0: dd returns as soon as input is available, with every
+        # byte queued so far (keys pile up while an update runs). The x keeps
+        # $(...) from eating a trailing newline (Enter).
+        keys=$(dd bs=1024 count=1 2>/dev/null; printf x) || break
+        keys=${keys%x}
+        [ -n "$keys" ] || break
+        kill -0 "$renderer_pid" 2>/dev/null || break
+
+        delta=0
+        while [ -n "$keys" ]; do
+            case "$keys" in
+                "$esc"[[O]?*)
+                    case "$keys" in
+                        "$esc"?A*) delta=$((delta - 1)) ;;
+                        "$esc"?B*) delta=$((delta + 1)) ;;
+                    esac
+                    rest=${keys#???}
+                    ;;
+                k*) delta=$((delta - 1)); rest=${keys#?} ;;
+                j*) delta=$((delta + 1)); rest=${keys#?} ;;
+                "$cr"* | "$nl"*)
+                    apply_selection "$delta" enter
+                    delta=0
+                    rest=${keys#?}
+                    ;;
+                *) rest=${keys#?} ;;
+            esac
+            # A byte the shell cannot match as a character: drop the rest.
+            [ "$rest" != "$keys" ] || break
+            keys=$rest
+        done
+        [ "$delta" -eq 0 ] || apply_selection "$delta"
+    done
+}
+
+apply_selection() {
+    # The sidebar pane moves between sessions, so the viewing session is
+    # resolved from the pane itself on every burst (inside select_move's
+    # single list call, no extra tmux call).
+    select_move "${TMUX_PANE:-}" "$@" || return 0
+    kill -USR1 "$renderer_pid" 2>/dev/null || true
+}
+
+stty_saved=''
+reader_pid=''
+if [ -t 0 ]; then
+    stty_saved=$(stty -g 2>/dev/null) || stty_saved=''
+    # -echo also stops unhandled keys from walking the cursor around.
+    stty -echo -icanon min 1 time 0 2>/dev/null || true
+    # Asynchronous lists get stdin from /dev/null unless redirected explicitly.
+    exec 3<&0
+    handle_keys "$$" <&3 &
+    reader_pid=$!
+    exec 3<&-
+fi
+
+restore() {
+    if [ -n "$reader_pid" ]; then
+        kill "$reader_pid" 2>/dev/null || true
+    fi
+    printf '\033[?25h\033[?1049l'
+    if [ -n "$stty_saved" ]; then
+        stty "$stty_saved" 2>/dev/null || true
+    fi
+}
+
+trap restore EXIT
+printf '\033[?1049h\033[?25l'
+
+# Background sessions (bin/orchestra-bg-refresh) are polled every
+# @orchestra_bg_interval seconds, read once at start (0 disables), in a
+# background job that nudges this loop when the list changes. At most one
+# runs at a time.
+bg_interval=$(tmux show-options -gqv @orchestra_bg_interval 2>/dev/null) || bg_interval=''
+case "$bg_interval" in '' | *[!0-9]*) bg_interval=10 ;; esac
+bg_ticks=$((bg_interval * 8))
+bg_pid=''
+
+refresh_bg() {
+    [ "$bg_ticks" -gt 0 ] || return 0
+    [ $((FRAME_INDEX % bg_ticks)) -eq 0 ] || return 0
+    if [ -n "$bg_pid" ] && kill -0 "$bg_pid" 2>/dev/null; then
+        return 0
+    fi
+    "$ORCHESTRA_LIB/../bin/orchestra-bg-refresh" "$$" </dev/null >/dev/null 2>&1 &
+    bg_pid=$!
+}
 
 FRAME_INDEX=0
 while true; do
+    nudged=0
+    refresh_bg
     redraw
     FRAME_INDEX=$((FRAME_INDEX + 1))
     sleep_interruptible 0.125

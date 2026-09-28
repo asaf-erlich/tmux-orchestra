@@ -1,0 +1,7 @@
+40|off|#d29922|beta
+alpha|@1|agent|1|running|Bash: make|main|/tmp/alpha|||||||||claude||0|1
+alpha|@2|plain|0|||main|/tmp/alpha|ls||||||||||0|0
+beta|@3|review|0|waiting|Allow edit?||/tmp/beta|||||||||claude||0|1
+beta|@4|work|1|||dev|/tmp/work|||||||||||0|0
+beta|@4|work|1|||dev|/tmp/work|||||||||||0|1
+beta|@5|logs|0|running|stale||/tmp/logs|||||||||||0|0

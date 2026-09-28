@@ -1,0 +1,194 @@
+#!/bin/sh
+# Claude Code hook dispatcher: maps Claude Code hook events (JSON on stdin)
+# onto orchestra state. Wire each event in ~/.claude/settings.json as
+# `orchestra-claude-hook <event>`; see hooks/claude-code/README.md.
+#
+#   prompt         UserPromptSubmit: store the prompt, mark running
+#   pre-tool       PreToolUse: mark running with a readable tool summary
+#   notification   Notification: permission prompts and questions mark the
+#                  window waiting; the idle reminder Claude sends a minute
+#                  after a turn ends does not (the turn is over, not blocked)
+#   stop           Stop: done, finish time, unread unless you are looking
+#   session-start  SessionStart: /clear and fresh starts leave an empty
+#                  session marker; resume restores the last prompt
+#   session-end    SessionEnd: clear state
+#   backfill       Not a hook. Fill prompt, finish time and empty-session
+#                  marker for Claude panes already running, from
+#                  ~/.claude/sessions/<pid>.json and the session transcript.
+#
+# Requires jq. Always exits 0 so a hook never blocks Claude.
+
+BIN_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck disable=SC1091
+. "$BIN_DIR/../lib/common.sh"
+# shellcheck disable=SC1091
+. "$BIN_DIR/../lib/select.sh"
+
+CLAUDE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+
+orchestra() {
+    "$BIN_DIR/orchestra" "$@" >/dev/null 2>&1
+}
+
+field() {
+    printf '%s' "$input" | jq -r "$1 // empty" 2>/dev/null
+}
+
+# Last prompt the user typed in a transcript: string or text-block content,
+# skipping meta entries, tool results and slash-command/hook markup.
+last_prompt() {
+    [ -r "$1" ] || return 0
+    tail -n 5000 "$1" 2>/dev/null | jq -r '
+        select(.type == "user" and (.isMeta | not))
+        | .message.content
+        | if type == "string" then .
+          elif type == "array" and ([.[]? | select(.type == "tool_result")] | length) == 0
+          then [.[]? | select(.type == "text") | .text] | join(" ")
+          else empty end
+        | gsub("\\s+"; " ") | ltrimstr(" ")
+        | select(. != "" and (startswith("<") | not))' 2>/dev/null | tail -n 1
+}
+
+mtime() {
+    date -r "$1" +%s 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+event_prompt() {
+    prompt=$(field .prompt)
+    orchestra set-prompt "$prompt" --window "$target"
+    clear_opt "$target" '@ab_session_source'
+    orchestra set-state running --spinner claude --action thinking --window "$target"
+}
+
+event_pre_tool() {
+    action=$(field '.tool_name + ": " + ((.tool_input.description // .tool_input.command
+        // .tool_input.file_path // .tool_input.pattern // .tool_input.url
+        // .tool_input.prompt // (.tool_input | tostring)) | tostring
+        | gsub("\\s+"; " ") | .[0:100])')
+    orchestra set-state running --spinner claude --action "${action:-working}" --window "$target"
+}
+
+event_notification() {
+    kind=$(field .notification_type)
+    message=$(field .message)
+    case "$kind" in
+        idle_prompt) return 0 ;;
+        permission_prompt)
+            # The pending tool call PreToolUse just recorded says more than
+            # "Claude needs your permission to use Bash".
+            pending=$(get_opt "$target" '@ab_current_action')
+            [ "$pending" = 'thinking' ] && pending=''
+            orchestra set-state waiting --spinner claude --action "allow? ${pending:-$message}" --window "$target"
+            ;;
+        *)
+            orchestra set-state waiting --spinner claude --action "${message:-needs input}" --window "$target"
+            ;;
+    esac
+    orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" --window "$target"
+}
+
+event_stop() {
+    orchestra set-state 'done' --window "$target"
+    orchestra clear-state --window "$target"
+    # Unread means "finished while you were elsewhere": skip it for the
+    # window an attached client is showing.
+    looking=$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)
+    [ "$looking" = 1 ] || orchestra notify --quiet --title 'Claude Code' --body 'finished' --window "$target"
+}
+
+event_session_start() {
+    source=$(field .source)
+    [ "$source" = 'compact' ] && return 0
+    orchestra clear-state --window "$target"
+    case "$source" in
+        clear|startup)
+            orchestra set-prompt '' --window "$target"
+            clear_opt "$target" '@ab_finished_at'
+            clear_opt "$target" '@ab_last_notification'
+            set_opt "$target" '@ab_session_source' "$source"
+            ;;
+        *)
+            prompt=$(last_prompt "$(field .transcript_path)")
+            orchestra set-prompt "$prompt" --window "$target"
+            clear_opt "$target" '@ab_session_source'
+            ;;
+    esac
+}
+
+# Claude's pid for a pane: the pane process itself or one of its children.
+claude_session_file() {
+    for pid in "$1" $(pgrep -P "$1" 2>/dev/null); do
+        [ -r "$CLAUDE_DIR/sessions/$pid.json" ] && { printf '%s\n' "$CLAUDE_DIR/sessions/$pid.json"; return 0; }
+    done
+    return 1
+}
+
+backfill() {
+    tmux list-panes -a -F "#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
+    while IFS='|' read -r window pane_pid is_claude state; do
+        [ "$is_claude" = 1 ] || continue
+        if ! session_file=$(claude_session_file "$pane_pid"); then
+            # `claude agents` (the background-agent manager) has no session.
+            case " $(ps -o command= -p "$pane_pid" 2>/dev/null) $(pgrep -lfP "$pane_pid" 2>/dev/null) " in
+                *' agents '*)
+                    set_opt "$window" '@ab_session_source' 'agents'
+                    clear_opt "$window" '@ab_last_prompt'
+                    clear_opt "$window" '@ab_last_notification'
+                    printf '%s (agents view)\n' "$window"
+                    ;;
+            esac
+            continue
+        fi
+        sid=$(jq -r '.sessionId // empty' "$session_file" 2>/dev/null)
+        status=$(jq -r '.status // empty' "$session_file" 2>/dev/null)
+        [ -n "$sid" ] || continue
+        transcript=$(find "$CLAUDE_DIR/projects" -maxdepth 2 -name "$sid.jsonl" 2>/dev/null | head -n 1)
+        prompt=''
+        [ -n "$transcript" ] && prompt=$(last_prompt "$transcript")
+        if [ -n "$prompt" ]; then
+            set_opt "$window" '@ab_last_prompt' "$prompt"
+            clear_opt "$window" '@ab_session_source'
+        else
+            clear_opt "$window" '@ab_last_prompt'
+            set_opt "$window" '@ab_session_source' 'empty'
+        fi
+        [ "$status" = 'idle' ] || continue
+        # Idle: any state left is stale (the idle reminder's "waiting", a
+        # "running" whose Stop hook predates this script); the transcript's
+        # last write is when the turn ended.
+        if [ -n "$state" ]; then
+            clear_opt "$window" '@ab_agent_state'
+            clear_opt "$window" '@ab_current_action'
+            clear_opt "$window" '@ab_spinner'
+        fi
+        case "$(get_opt "$window" '@ab_last_notification')" in
+            *'waiting for input'*) clear_opt "$window" '@ab_last_notification' ;;
+        esac
+        if [ -n "$transcript" ] && [ -n "$prompt" ]; then
+            finished=$(mtime "$transcript")
+            [ -n "$finished" ] && set_opt "$window" '@ab_finished_at' "$finished"
+        fi
+        printf '%s %s\n' "$window" "${prompt:-(empty session)}" | cut -c 1-100
+    done
+}
+
+event=${1-}
+if [ "$event" = backfill ]; then
+    backfill
+    exit 0
+fi
+
+input=$(cat)
+command -v jq >/dev/null 2>&1 || exit 0
+target=$(resolve_window '' 2>/dev/null) || exit 0
+[ -n "$target" ] || exit 0
+
+case "$event" in
+    prompt) event_prompt ;;
+    pre-tool) event_pre_tool ;;
+    notification) event_notification ;;
+    stop) event_stop ;;
+    session-start) event_session_start ;;
+    session-end) orchestra clear-state --window "$target" ;;
+esac
+exit 0

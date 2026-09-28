@@ -1,0 +1,30 @@
+┏━ build git:main ━━━━━━━━━━━━━━━━━ 5m ━
+┃ ❯ fix the flaky test | then push
+┃ project
+┌─ api ─────────────────────────────────
+│· Bash: make test
+│ ❯ add retries to the client
+┌─ docs ─────────────────────────!─ 3d ─
+│ docs  $ ls
+│ 
+┌─ infra ────────────────────────── 2w ─
+│? Allow Bash?
+│ ❯ plan the migration
+┌─ a-window-with-a-very-long-name…  2h ─
+│ 
+│ 
+┌─ seen ────────────────────────────────
+│· Read: a.md
+│ ❯ summarize the docs
+┌─ fresh ────────────────────────── 2h ─
+│ ∅ cleared
+│ fresh
+┌─ old ──────────────────────────── 9d ─
+│ ∅ empty session
+│ old
+┌─ legacy ──────────────────────────────
+│ legacy  $ claude
+│ Claude Code: finished
+┌─ longdir ─────────────────────────────
+│ ❯ check the rollout
+│ platform-engineering-domain-and-a-muc…

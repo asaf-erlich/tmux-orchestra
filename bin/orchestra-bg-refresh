@@ -1,0 +1,46 @@
+#!/bin/sh
+# Refresh @orchestra_bg_agents, the background Claude Code sessions the
+# sidebar lists after its windows. bin/orchestra-render runs this in the
+# background every @orchestra_bg_interval seconds; `claude agents --json`
+# starts a whole node process, far too slow for the render tick.
+#
+# Usage: orchestra-bg-refresh [RENDERER_PID]
+#
+# The value is one "id;state;started_at;cwd;name" record per session of kind
+# "background" (the daemon's sessions, which no tmux pane runs), joined by
+# "|", with ";", "|", "#" and newlines in the fields replaced by spaces.
+# Sessions a window is attached to (@orchestra_bg_id, set by the window
+# select_bg_open in lib/select.sh opens) are left out: the window lists
+# them. Unset when there are none, @orchestra_background is off, or claude or
+# jq is missing. The renderer is nudged (SIGUSR1) only when the value
+# changed. Always exits 0.
+
+out=$(tmux display-message -p '#{@orchestra_background}|#{@orchestra_bg_agents}' \; \
+	list-windows -a -F '#{@orchestra_bg_id}' 2>/dev/null) || exit 0
+header=$(printf '%s\n' "$out" | sed -n 1p)
+attached=$(printf '%s\n' "$out" | sed 1d | tr '\n' ' ')
+enabled=${header%%|*}
+current=${header#*|}
+
+value=''
+if [ "$enabled" != 'off' ] && command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+	json=$(claude agents --json 2>/dev/null) || exit 0
+	value=$(printf '%s' "$json" | jq -r --arg attached "$attached" '
+		($attached | split(" ")) as $att
+		| [ .[]?
+			| select(.kind == "background" and (.id | type) == "string")
+			| select(.id as $i | any($att[]; . == $i) | not)
+			| [.id, (.state // ""), (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
+			| map(tostring | gsub("[|;#\n\r]"; " "))
+			| join(";") ]
+		| join("|")' 2>/dev/null) || exit 0
+fi
+
+[ "$value" != "$current" ] || exit 0
+if [ -n "$value" ]; then
+	tmux set-option -gq @orchestra_bg_agents "$value" 2>/dev/null || exit 0
+else
+	tmux set-option -gqu @orchestra_bg_agents 2>/dev/null || exit 0
+fi
+[ -z "${1:-}" ] || kill -USR1 "$1" 2>/dev/null || true
+exit 0

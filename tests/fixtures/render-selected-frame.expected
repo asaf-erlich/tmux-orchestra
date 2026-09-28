@@ -1,0 +1,6 @@
+┏━ dev:build git:main ━━━━━━━━━━━━━━━━━━
+┃ project  $ ls
+┃ 
+▌─ dev:tests ───────────────────────────
+▌* Bash: pytest
+▌ > phase  #######--- 70% Tests

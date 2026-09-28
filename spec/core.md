@@ -49,7 +49,7 @@ All shell scripts start with `#!/bin/sh` and `set -eu`. Library files in `lib/` 
 
 ## User-option schema (authoritative)
 
-All options are tmux **window** options unless noted. Keys are literal — the renderer does `tmux list-windows -F '#{@ab_agent_state}|...'` and parses by position.
+All options are tmux **window** options unless noted. Keys are literal — the renderer does `tmux list-panes -a -F '#{@ab_agent_state}|...'` and parses by position (window options resolve on every pane line).
 
 | Option | Type | Writer | Cleared by |
 |---|---|---|---|
@@ -66,7 +66,12 @@ All options are tmux **window** options unless noted. Keys are literal — the r
 | `@ab_cwd` | string | Prompt hook | overwritten |
 | `@ab_last_cmd` | string ≤ 80 | Prompt hook | overwritten |
 | `@ab_last_exit` | integer | Prompt hook | overwritten |
-| `@ab_width` (session) | integer | `orchestra-toggle` | — |
+| `@orchestra_sidebar_width` (global) | integer | `orchestra-toggle`, `after-resize-pane` hook | — |
+| `@orchestra_sidebar_pane_id` (global) | pane id | `orchestra-toggle` | toggle close; `orchestra-follow` when the pane is gone |
+| `@orchestra_sidebar_pid` (global) | pid | `orchestra-toggle` | as above |
+| `@orchestra_selected_window` (global) | window id | `lib/select.sh` | Enter, click, `pane-focus-in` |
+
+There is one sidebar per tmux server, so its state is global. Per-session `@ab_width` / `@ab_sidebar_pane_id` / `@ab_sidebar_pid` / `@ab_selected_window` from earlier versions are unset (and their sidebar panes closed) when `orchestra.tmux` loads.
 
 **Target resolution.** Every CLI call resolves "which window?" in this order:
 
