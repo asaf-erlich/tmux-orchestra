@@ -546,6 +546,18 @@ orchestra-click 0 other
 wait_eq "orchestra-tests|$window_id" 'a click across sessions switches the client' where_client
 wait_eq "orchestra-tests|$window_id" 'the sidebar follows the client back' where_pane "$sidebar"
 
+# Enter on the second Claude pane of a window, from another window whose
+# last active pane was the first: select-window fires pane-focus-in for the
+# first pane, and the follow hook must not select it back.
+tmux select-pane -t "$w1_first"
+tmux select-window -t "$window2_id"
+wait_eq "orchestra-tests|$window2_id" 'the sidebar follows the client to a plain window' where_pane "$sidebar"
+tmux set-option -gq @orchestra_selected_window "$w1_second"
+orchestra-select enter orchestra-tests
+wait_eq "orchestra-tests|$window_id" 'the sidebar follows the client to the picked pane' where_pane "$sidebar"
+sleep 0.5
+assert_eq "$window_id|$w1_second" "$(where_active)" 'enter from another window keeps the picked second pane'
+
 # A sidebar pane killed by hand: follow forgets it instead of failing.
 tmux kill-pane -t "$sidebar"
 orchestra-follow "$window_id" "$first_pane"

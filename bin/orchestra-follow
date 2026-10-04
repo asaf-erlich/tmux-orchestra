@@ -49,9 +49,14 @@ fi
 # Never try to move the sidebar next to itself.
 [ "$target_pane" != "$sidebar_pane" ] || exit 0
 
-# Fall back to the active pane in the current window.
-if [ -z "$target_pane" ]; then
-    target_pane=$(tmux display-message -p -t "$current_window" '#{pane_id}' 2>/dev/null) || exit 0
+# Fall back to the active pane in the current window. The hook's pane can
+# also be stale: select-window fires pane-focus-in for the window's previous
+# active pane, and a select-pane in the same command (a sidebar click or
+# Enter on another pane of that window) has already moved focus on by the
+# time this runs. Selecting the stale pane would undo that pick.
+active_pane=$(tmux display-message -p -t "$current_window" '#{pane_id}' 2>/dev/null) || exit 0
+if [ -z "$target_pane" ] || [ "$(tmux display-message -p -t "$target_pane" '#{pane_active}' 2>/dev/null)" != 1 ]; then
+    target_pane=$active_pane
 fi
 [ -n "$target_pane" ] || exit 0
 

@@ -14,7 +14,9 @@ All of them are on the `fix-pane-exists` branch.
   and one sidebar row. The Claude Code hook now writes its state to its
   own pane, and the sidebar draws one row per Claude pane, titled
   `session:window.<pane index>` when a window has several (a window with
-  one keeps `session:window`). Enter or a click selects that pane. Every
+  one keeps `session:window`). Enter or a click selects that pane, also
+  from another window (the focus hook no longer moves focus back to the
+  window's previously active pane). Every
   `orchestra` subcommand takes `--pane %N` to write pane options; without
   it they stay window-scoped, so OpenCode, the prompt hooks and your own
   scripts work as before. Window-level state from the earlier version is
