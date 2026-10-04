@@ -217,7 +217,7 @@ function with_style(style, c, text,    s) {
 # f[] holds the pipe-separated window fields of one input line; f[23] is
 # @ab_session_source and f[24] the last prompt with any "|" it contained
 # rejoined.
-function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you) {
+function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
 	active = f[4]; state = f[5]
 
 	# How long ago the agent last finished (@ab_finished_at, falling back to
@@ -239,12 +239,11 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	activity = activity_text(state, f[6], f[8], f[9], f[24], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
-	# Finished while you were elsewhere (unread): a done check mark. Without
-	# Nerd Fonts the unread "!" in the border already says it.
-	if (idle && !empty && f[12] == "1" && nerd == "on") {
-		glyph = state_glyph("done", frame, nerd, "")
-		gcolor = done_color
-	}
+	# Finished while you were elsewhere (unread): rows in the done color and,
+	# with Nerd Fonts, a check mark (without, the unread "!" in the border
+	# already says it).
+	unread_done = (idle && !empty && f[12] == "1")
+	if (unread_done && nerd == "on") glyph = state_glyph("done", frame, nerd, "")
 	if (glyph != "" && activity != "") activity = trim(width - 3, activity)
 	else if (glyph == "") activity = trim(width - 2, activity)
 
@@ -280,14 +279,15 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 	# Each state has its own color (state_color). Waiting on you and errors
 	# also color the title; every state but running colors its rows (running
-	# colors only the spinner); an empty session reads dim grey.
-	scolor = state_color(state, f[17], wait_color)
+	# colors only the spinner), as does an unread finish; an empty session
+	# reads dim grey.
+	scolor = unread_done ? done_color : state_color(state, f[17], wait_color)
 	needs_you = (state == "waiting" || state == "error")
 	title_style = ""
 	if (active == "1" && needs_you) title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
 	else if (needs_you) title_style = "color"
-	row_style = ((live_state(state) && state != "running") || empty) ? "color" : ""
+	row_style = ((live_state(state) && state != "running") || empty || unread_done) ? "color" : ""
 	row_color = empty ? "#808080" : scolor
 
 	# Unread: a red dot replaces the second-to-last character of the top

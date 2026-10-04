@@ -49,7 +49,7 @@ All of them are on the `fix-pane-exists` branch.
   is red; waiting on background work is blue (`◴`, `&` without Nerd
   Fonts); compacting is purple (`◜`, `=`); a turn that ended on an API
   error such as a rate limit is yellow (`✗`, `X`); an idle window that
-  finished while you were elsewhere shows a green `✓` (Nerd Fonts only);
+  finished while you were elsewhere is green, with a `✓` (Nerd Fonts);
   idle windows you have seen stay plain. Set the colors with
   `@orchestra_wait_color`, `@orchestra_background_color`,
   `@orchestra_compacting_color`, `@orchestra_error_color` and

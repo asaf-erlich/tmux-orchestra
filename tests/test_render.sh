@@ -229,3 +229,26 @@ check_spinner opencode 4 '⢾⡱'
 check_spinner opencode 5 '⠰⠆'
 check_spinner opencode 8 '⢎⡱'
 
+
+# State colors (forced on: render_rows only colors a terminal). Background
+# rows take the background color; an unread finish colors its rows and, with
+# Nerd Fonts, a check mark in the done color.
+render_colored() {
+    awk -v mode=rows -v width=40 -v frame=0 -v nerd="$1" -v wait_color='#f85149' \
+        -v color=1 "$_RENDER_AWK_LIB$_RENDER_AWK_MAIN"
+}
+check_colored() {
+    case "$2" in
+        *"$3"*) ;;
+        *) printf 'color: %s missing "%s"\n%s\n' "$1" "$3" "$2" >&2; exit 1 ;;
+    esac
+}
+green=$(printf '\033[38;2;63;185;80m')
+blue=$(printf '\033[38;2;88;166;255m')
+out=$(printf '%s\n' 'dev|@1|api|0|background|1 background: agent|||||||||||claude' | render_colored off)
+check_colored 'background row' "$out" "${blue}&"
+check_colored 'background activity row' "$out" "${blue}1 background: agent"
+out=$(printf '%s\n' 'dev|@1|api|0||||/src/api|ls|||1|Claude Code: finished||||' | render_colored on)
+check_colored 'unread check mark' "$out" "${green}✓"
+check_colored 'unread activity row' "$out" "${green}api  \$ ls"
+check_colored 'unread meta row' "$out" "${green}Claude Code: finished"
