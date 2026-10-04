@@ -19,7 +19,10 @@ All of them are on the `fix-pane-exists` branch.
   it they stay window-scoped, so OpenCode, the prompt hooks and your own
   scripts work as before. Window-level state from the earlier version is
   cleared the next time Claude starts a session or a turn (or by
-  `orchestra-claude-hook backfill`). Restart the sidebar after upgrading
+  `orchestra-claude-hook backfill`), so another pane in that window may
+  show no prompt until its next turn. A new or cleared session now records
+  its start time, so its age counts up instead of following the window's
+  activity. Restart the sidebar after upgrading
   (`prefix + B` twice).
 - **Background Claude Code sessions in the sidebar.** Sessions run by the
   Claude Code daemon (`claude --bg`, sent to the background from an

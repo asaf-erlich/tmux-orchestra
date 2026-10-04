@@ -203,7 +203,10 @@ event_session_start() {
     case "$source" in
         clear|startup)
             orchestra set-prompt '' "$scope" "$target"
-            clear_opt "$target" '@ab_finished_at'
+            # Age a fresh session from its start. Without its own stamp a
+            # pane falls back to the window's activity, which every other
+            # pane in the window keeps at "now".
+            set_opt "$target" '@ab_finished_at' "$(date +%s)"
             clear_opt "$target" '@ab_last_notification'
             set_opt "$target" '@ab_session_source' "$source"
             ;;

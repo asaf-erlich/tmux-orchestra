@@ -352,6 +352,9 @@ orchestra set-state running --action 'old window state' --window "$window_id"
 orchestra set-prompt 'old window prompt' --window "$window_id"
 pane_hook "$window1_claude_pane" session-start '{"source":"startup"}'
 assert_eq '' "$(opt @ab_agent_state)$(opt @ab_last_prompt)" 'session-start clears window-level state left by an earlier version'
+case "$(popt "$window1_claude_pane" @ab_finished_at)" in
+    ''|*[!0-9]*) assert_eq 'epoch seconds' "$(popt "$window1_claude_pane" @ab_finished_at)" 'session-start stamps the pane start time' ;;
+esac
 pane_hook "$window1_claude_pane" prompt '{"prompt":"first pane task"}'
 pane_hook "$second_pane" prompt '{"prompt":"second pane task"}'
 pane_hook "$second_pane" notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
