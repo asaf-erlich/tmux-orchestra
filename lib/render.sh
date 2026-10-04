@@ -214,8 +214,8 @@ function with_style(style, c, text,    s) {
 }
 
 # One window block: exactly three lines (orchestra-click depends on this).
-# f[] holds the pipe-separated window fields of one input line; f[23] is
-# @ab_session_source and f[24] the last prompt with any "|" it contained
+# f[] holds the pipe-separated fields of one input line (one pane); f[23] is
+# @ab_session_source and f[27] the last prompt with any "|" it contained
 # rejoined.
 function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
 	active = f[4]; state = f[5]
@@ -235,8 +235,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	if (pad < 0) pad = 0
 
 	idle = !live_state(state)
-	empty = (idle && f[24] == "" && f[23] != "")
-	activity = activity_text(state, f[6], f[8], f[9], f[24], f[23])
+	empty = (idle && f[27] == "" && f[23] != "")
+	activity = activity_text(state, f[6], f[8], f[9], f[27], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
@@ -261,8 +261,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	# the prompt while the agent works on it, the directory once the prompt or
 	# the empty-session marker took the activity row. The last notification
 	# is only a fallback (unread already shows as the dot).
-	if (meta == "" && f[24] != "" && !idle) meta = "❯ " f[24]
-	else if (meta == "" && (f[24] != "" || empty)) meta = cwd_label(f[8])
+	if (meta == "" && f[27] != "" && !idle) meta = "❯ " f[27]
+	else if (meta == "" && (f[27] != "" || empty)) meta = cwd_label(f[8])
 	else if (meta == "") meta = f[13]
 	meta = trim(width - 2, meta)
 
@@ -334,7 +334,7 @@ function bg_separator(width) {
 function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id) {
 	split(rec, r, ";")
 	id = r[1]
-	for (g = 1; g <= 24; g++) g_f[g] = ""
+	for (g = 1; g <= 27; g++) g_f[g] = ""
 	g_f[2] = "bg:" id
 	g_f[3] = (r[5] != "") ? r[5] : id
 	g_f[4] = "0"
@@ -360,20 +360,25 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 }
 '
 
-# Main program. mode=rows: every input line is a window; width, nerd,
+# Main program. mode=rows: every input line is a block; width, nerd,
 # wait_color, sel and now come from -v. mode=frame: the first line is
 # "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION|NOW|BG|COMPACT|ERROR|DONE" (NOW, epoch
 # seconds, is empty live and fixed in tests; the last four are the state
 # colors, empty for the defaults), then one line per pane of the server
-# (list-panes -a); only windows with a Claude pane (field 20) are shown, once
-# each, in input order, titled "session:window", and the selection is
-# derived from fields 18-19. window_active (field 4) is per session, so only
-# the active window of VIEW_SESSION (the sidebar's own session, i.e. what the
-# viewing client shows) is drawn as active; an empty VIEW_SESSION keeps
-# field 4 as is.
+# (list-panes -a); only Claude panes (field 20) are shown, once each, in input
+# order. A block is titled "session:window", or "session:window.PANE_INDEX"
+# when its window has several Claude panes. The selection is derived from
+# fields 18-19. Fields 24-26 are pane_id, pane_index and 1 for the window's
+# active pane, 2 for its previously active one (pane_last), else 0; empty
+# (an older dump) means one block per window as before. A block's id is its
+# pane_id, else its window_id. window_active (field 4) is per session, so only
+# a pane of the active window of VIEW_SESSION (the sidebar's own session,
+# i.e. what the viewing client shows) is drawn as active: its active pane,
+# else its previously active one, else its first Claude pane. An empty
+# VIEW_SESSION keeps field 4 as is.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
-BEGIN { FS = "|"; set_state_colors() }
+BEGIN { FS = "|"; set_state_colors(); active_rank = 9 }
 mode == "frame" && NR == 1 {
 	width = $1; nerd = $2; wait_color = $3; view = $4; now = $5
 	bg_color = $6; compact_color = $7; error_color = $8; done_color = $9
@@ -394,19 +399,23 @@ mode != "frame" { n++; line[n] = $0; next }
 	# window, i.e. the sidebar has focus.
 	s = $18
 	if ($19 == "1") focused = 1
-	# Field 20 is 1 when the pane runs Claude Code. Windows without one are
-	# hidden, which also hides @ab_agent_state etc. left behind when Claude
-	# exited without its Stop hook. Window fields are the same on every pane
-	# line, so the first Claude pane stands for its window (a window linked
-	# into several sessions is listed under the first).
+	# Field 20 is 1 when the pane runs Claude Code. Other panes are hidden,
+	# which also hides @ab_agent_state etc. left behind when Claude exited
+	# without its Stop hook. A pane of a window linked into several sessions
+	# is listed under the first.
 	if ($20 != "1") next
-	if ($4 == "1" && (view == "" || $1 == view)) active_id = $2
-	if ($2 in seen) next
-	seen[$2] = 1
+	key = ($24 != "") ? $24 : $2
+	if ($4 == "1" && (view == "" || $1 == view)) {
+		rank = ($26 == "1" || $24 == "") ? 1 : ($26 == "2") ? 2 : 3
+		if (rank < active_rank) { active_rank = rank; active_id = key }
+	}
+	if (key in seen) next
+	seen[key] = 1
 	n++
 	line[n] = $0
-	if (n == 1) first_id = $2
-	if ($2 == s) valid = 1
+	panes[$2]++
+	if (n == 1) first_id = key
+	if (key == s) valid = 1
 }
 END {
 	if (mode == "frame") {
@@ -418,10 +427,10 @@ END {
 			split(bg[i], r, ";")
 			if ("bg:" r[1] == s) valid = 1
 		}
-		# Show the selection while focused, falling back to the active window
+		# Show the selection while focused, falling back to the active pane
 		# (or the first listed one when the active window is not listed) when
 		# the stored id is unset or stale. Unfocused, show it only if it points
-		# somewhere other than the active window (mouse wheel).
+		# somewhere other than the active pane (mouse wheel).
 		sel = ""
 		if (valid) { if (focused || s != active_id) sel = s }
 		else if (focused) sel = (active_id != "") ? active_id : first_id
@@ -430,12 +439,14 @@ END {
 	out = ""
 	for (i = 1; i <= n; i++) {
 		nf = split(line[i], f, "|")
-		for (j = 25; j <= nf; j++) f[24] = f[24] "|" f[j]
+		for (j = 28; j <= nf; j++) f[27] = f[27] "|" f[j]
+		key = (f[24] != "") ? f[24] : f[2]
 		if (mode == "frame") {
-			f[4] = (f[2] == active_id) ? "1" : "0"
+			f[4] = (key == active_id) ? "1" : "0"
 			f[3] = f[1] ":" f[3]
+			if (panes[f[2]] > 1 && f[25] != "") f[3] = f[3] "." f[25]
 		}
-		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && f[2] == sel)
+		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && (key == sel || f[2] == sel))
 	}
 	if (mode == "frame" && n == 0) out = " " trim(width - 1, "no claude sessions") EL "\n"
 	# Background sessions: one separator line, then 3-line blocks (select_row
@@ -451,11 +462,11 @@ END {
 }
 '
 
-# Usage: render_rows WIDTH FRAME NERD WAIT_COLOR [SELECTED_WINDOW_ID] [NOW]
-# SELECTED_WINDOW_ID marks the keyboard selection; empty means none. Fields
-# 18-20 of each input line are ignored; 21-24 are the finish time, window
-# activity time, session source and last prompt as in render_frame. NOW (epoch seconds) is
-# what finish times are measured against; empty means no ages are shown.
+# Usage: render_rows WIDTH FRAME NERD WAIT_COLOR [SELECTED_ID] [NOW]
+# SELECTED_ID (a pane or window id) marks the keyboard selection; empty means
+# none. Fields 18-20 and 25-26 of each input line are ignored; 21-24 and 27
+# are as in render_frame. NOW (epoch seconds) is what finish times are
+# measured against; empty means no ages are shown.
 render_rows() {
 	# Not $(...): render_supports_color checks whether stdout is a terminal.
 	_render_color=0
@@ -468,10 +479,10 @@ render_rows() {
 # Reads "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION|NOW" followed by the list-panes
 # -a dump (window fields 1-17, @orchestra_selected_window, the sidebar-focused
 # flag and the Claude pane flag as fields 18-20, then @ab_finished_at,
-# window_activity, @ab_session_source and @ab_last_prompt as 21-24; the
-# prompt comes last since it may itself contain "|") and renders one
-# "session:window" block per window that has a Claude pane, or a placeholder
-# line when there is none. A non-numeric WIDTH falls back to 32. An optional
+# window_activity, @ab_session_source, pane_id, pane_index, the active-pane
+# flag and @ab_last_prompt as 21-27; the prompt comes last since it may
+# itself contain "|") and renders one block per Claude pane, or a
+# placeholder line when there is none. A non-numeric WIDTH falls back to 32. An optional
 # "|bg|REC|..." line (@orchestra_bg_agents) adds a separator and one block per
 # background session after the windows.
 render_frame() {

@@ -9,6 +9,18 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Added
 
+- **A row for each Claude pane.** Two Claude Code sessions split into one
+  window used to share that window's state (the last hook to write won)
+  and one sidebar row. The Claude Code hook now writes its state to its
+  own pane, and the sidebar draws one row per Claude pane, titled
+  `session:window.<pane index>` when a window has several (a window with
+  one keeps `session:window`). Enter or a click selects that pane. Every
+  `orchestra` subcommand takes `--pane %N` to write pane options; without
+  it they stay window-scoped, so OpenCode, the prompt hooks and your own
+  scripts work as before. Window-level state from the earlier version is
+  cleared the next time Claude starts a session or a turn (or by
+  `orchestra-claude-hook backfill`). Restart the sidebar after upgrading
+  (`prefix + B` twice).
 - **Background Claude Code sessions in the sidebar.** Sessions run by the
   Claude Code daemon (`claude --bg`, sent to the background from an
   interactive session, or launched from FleetView) run in no tmux pane, so
@@ -104,6 +116,10 @@ All of them are on the `fix-pane-exists` branch.
   hook now skips the unread mark for the window an attached client is
   showing, as Stop already did, and reconcile drops the unread when it
   clears a window.
+- **Two Claude panes in one window.** Reconcile cleared the window as soon
+  as one of its Claude panes went idle, even while the other was still
+  working. Each Claude pane now has its own state, and reconcile clears a
+  pane only when its own session has been idle for 3 seconds.
 - **Focus loop that could crash the terminal.** `orchestra-follow` resolved
   the "current" window against whichever client tmux picked, which could
   make focus hooks fire each other in a loop. In one case iTerm2 grew to

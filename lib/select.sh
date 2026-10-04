@@ -3,18 +3,20 @@
 # sources this once, so a keypress costs no shell startup). Only shell
 # builtins besides the tmux calls: process creation is slow on some systems.
 #
-# The sidebar lists the windows running Claude Code in every session of the
-# server, in session-name then window-index order (list-panes -a order). This
-# file owns that filter: ORCHESTRA_CLAUDE_PANE is the per-pane tmux format
-# the renderer also appends to its list-panes dump, and select_windows builds
-# the same filtered, ordered list for keyboard selection and clicks.
+# The sidebar lists the panes running Claude Code in every session of the
+# server, one row each, in session-name, window-index then pane-index order
+# (list-panes -a order). This file owns that filter: ORCHESTRA_CLAUDE_PANE is
+# the per-pane tmux format the renderer also appends to its list-panes dump,
+# and select_windows builds the same filtered, ordered list for keyboard
+# selection and clicks.
 #
 # There is one sidebar per server. Its state lives in global options:
 # @orchestra_sidebar_pane_id, @orchestra_sidebar_pid, @orchestra_sidebar_width
-# and @orchestra_selected_window. The selection is a window_id, so it
-# survives window reordering. An unset or stale value means "the active
-# window of the viewing session", or the first listed window when that
-# window is not listed.
+# and @orchestra_selected_window. The selection is a pane_id (or "bg:<id>"),
+# so it survives window reordering. An unset or stale value means "the
+# active pane of the viewing session's active window" (else its previously
+# active pane, else its first Claude pane), or the first listed pane when
+# that window is not listed.
 
 # tmux format: 1 when the pane runs Claude Code, else 0. The Claude Code
 # binary is named after its version (~/.local/share/claude/versions/X.Y.Z),
@@ -23,14 +25,20 @@
 # shellcheck disable=SC2034 # Read by bin/orchestra-render and the tests.
 ORCHESTRA_CLAUDE_PANE='#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_command}}'
 
+# tmux format for select_windows: 0 outside the active window, else 1 for
+# its active pane, 2 for its previously active pane and 3 for any other.
+ORCHESTRA_PANE_RANK='#{?window_active,#{?pane_active,1,#{?pane_last,2,3}},0}'
+
 # Usage: select_windows TARGET
 # TARGET (a session, or a pane such as the sidebar's $TMUX_PANE) names the
-# viewing session: its active window is "active", and its most recently
-# active client is the one Enter and clicks switch. One tmux call. Sets:
-#   _sel_windows        one "window_id|active|session_id" line per listed
-#                       (Claude) window, in sidebar order, then one
+# viewing session: the best ranked Claude pane of its active window (see
+# ORCHESTRA_PANE_RANK) is "active", and its most recently active client is
+# the one Enter and clicks switch. One tmux call. Sets:
+#   _sel_windows        one "pane_id|rank|session_id" line per listed
+#                       (Claude) pane, in sidebar order (rank 0 outside the
+#                       viewing session's active window), then one
 #                       "bg:<id>|0|" line per background session
-#   _sel_nwin           the number of listed windows (not background sessions)
+#   _sel_nwin           the number of listed panes (not background sessions)
 #   _sel_bg             @orchestra_bg_agents ("id;state;started;cwd;name|...")
 #   _sel_stored         @orchestra_selected_window
 #   _sel_view_session   the viewing session's id
@@ -39,12 +47,12 @@ ORCHESTRA_CLAUDE_PANE='#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_co
 # Returns 1 if TARGET cannot be resolved.
 select_windows() {
 	_sel_out=$(tmux display-message -p -t "$1" '#{session_id}|#{@orchestra_sidebar_pid}|#{@orchestra_selected_window}' \; \
-		list-panes -a -F "#{window_id}|#{window_active}|$ORCHESTRA_CLAUDE_PANE|#{session_id}" \; \
+		list-panes -a -F "#{pane_id}|$ORCHESTRA_PANE_RANK|$ORCHESTRA_CLAUDE_PANE|#{session_id}" \; \
 		list-clients -t "$1" -F '>#{client_activity}|#{client_name}' \; \
 		display-message -p -t "$1" '|bg|#{@orchestra_bg_agents}' 2>/dev/null) || return 1
 	[ -n "$_sel_out" ] || return 1
 	_sel_windows=''
-	_sel_last=''
+	_sel_seen=' '
 	_sel_stored=''
 	_sel_client=''
 	_sel_client_act=-1
@@ -52,18 +60,17 @@ select_windows() {
 	_sel_nwin=0
 	_sel_bg=''
 	SELECT_SIDEBAR_PID=''
-	# The header line (session ids start with $), then pane lines (window ids
-	# start with @), then client lines (prefixed >). Panes of one window are
-	# consecutive, so a window is kept once, on its first Claude pane; a
-	# window linked into several sessions is listed under the first. The last
-	# line, "|bg|...", carries the background sessions (session ids are never
-	# empty).
+	# The header line (session ids start with $), then pane lines (pane ids
+	# start with %), then client lines (prefixed >). Each Claude pane is kept
+	# once; a pane of a window linked into several sessions is listed under
+	# the first. The last line, "|bg|...", carries the background sessions
+	# (session ids are never empty).
 	while IFS="|" read -r _sel_a _sel_b _sel_c _sel_d; do
 		case "$_sel_a" in
-			@*)
+			%*)
 				[ "$_sel_c" = '1' ] || continue
-				[ "$_sel_a" != "$_sel_last" ] || continue
-				_sel_last=$_sel_a
+				case "$_sel_seen" in *" $_sel_a "*) continue ;; esac
+				_sel_seen="$_sel_seen$_sel_a "
 				# window_active is per session; only the viewing session's
 				# active window is the one the client shows.
 				[ "$_sel_d" = "$_sel_view_session" ] || _sel_b=0
@@ -109,8 +116,9 @@ EOF
 }
 
 # Usage: select_pick N
-# Sets _sel_pick (and _sel_pick_session) to the window id (and its session
-# id) at 1-based position N of _sel_windows, or empty if out of range.
+# Sets _sel_pick (and _sel_pick_session) to the pane id or "bg:<id>" (and
+# its session id) at 1-based position N of _sel_windows, or empty if out of
+# range.
 select_pick() {
 	_sel_i=0
 	_sel_pick=''
@@ -130,10 +138,11 @@ EOF
 
 # Usage: select_go
 # Clears the selection and shows _sel_pick on the viewing client. One tmux
-# call (a background session: see select_bg_open). A window in the viewing session is selected; for a window in another
-# session the viewing client (_sel_client, always named: from run-shell or a
-# background process the "current client" is ambiguous) is switched to it.
-# The client-session-changed and pane-focus-in hooks then move the sidebar.
+# call (a background session: see select_bg_open). A pane in the viewing
+# session is selected with its window; for a pane in another session the
+# viewing client (_sel_client, always named: from run-shell or a background
+# process the "current client" is ambiguous) is switched to it first. The
+# client-session-changed and pane-focus-in hooks then move the sidebar.
 select_go() {
 	case "$_sel_pick" in
 		bg:*)
@@ -142,16 +151,19 @@ select_go() {
 			;;
 	esac
 	if [ "$_sel_pick_session" = "$_sel_view_session" ] || [ -z "$_sel_client" ]; then
-		tmux set-option -gqu @orchestra_selected_window \; select-window -t "$_sel_pick" >/dev/null 2>&1 || true
+		tmux set-option -gqu @orchestra_selected_window \; \
+			select-window -t "$_sel_pick" \; \
+			select-pane -t "$_sel_pick" >/dev/null 2>&1 || true
 	else
 		tmux set-option -gqu @orchestra_selected_window \; \
 			switch-client -c "$_sel_client" -t "$_sel_pick" \; \
-			select-window -t "$_sel_pick" >/dev/null 2>&1 || true
+			select-window -t "$_sel_pick" \; \
+			select-pane -t "$_sel_pick" >/dev/null 2>&1 || true
 	fi
 }
 
 # Usage: select_move TARGET DELTA [enter]
-# Moves the selection DELTA listed windows down (negative: up), clamped at
+# Moves the selection DELTA listed rows down (negative: up), clamped at
 # both ends. With "enter", clears the selection and shows the result instead
 # of storing it (select_go). Two tmux calls. TARGET is as for select_windows.
 # Sets SELECT_SIDEBAR_PID. Returns 1 if TARGET cannot be resolved.
@@ -162,19 +174,28 @@ select_move() {
 	select_windows "$1" || return 1
 	[ -n "$_sel_windows" ] || return 0
 
-	# Count windows and find the selected and active positions.
+	# Count rows and find the selected and active positions (the best
+	# ranked pane of the active window, as in lib/render.sh).
 	_sel_n=0
 	_sel_cur=0
 	_sel_active=0
+	_sel_rank=9
 	while IFS="|" read -r _sel_id _sel_act _sel_sess; do
 		[ -n "$_sel_id" ] || continue
 		_sel_n=$((_sel_n + 1))
-		[ "$_sel_act" = '1' ] && _sel_active=$_sel_n
+		case "$_sel_act" in
+			1 | 2 | 3)
+				if [ "$_sel_act" -lt "$_sel_rank" ]; then
+					_sel_rank=$_sel_act
+					_sel_active=$_sel_n
+				fi
+				;;
+		esac
 		[ -n "$_sel_stored" ] && [ "$_sel_id" = "$_sel_stored" ] && _sel_cur=$_sel_n
 	done <<EOF
 $_sel_windows
 EOF
-	# Unset or stale: the active window, or the first listed window when the
+	# Unset or stale: the active pane, or the first listed pane when the
 	# active window is not listed.
 	[ "$_sel_cur" -gt 0 ] || _sel_cur=$_sel_active
 	[ "$_sel_cur" -gt 0 ] || _sel_cur=1
@@ -248,7 +269,7 @@ EOF
 }
 
 # Usage: select_row TARGET LINE
-# Shows what sits at 0-based sidebar LINE (a click), as Enter does: window
+# Shows what sits at 0-based sidebar LINE (a click), as Enter does: pane
 # blocks are 3 lines each (or a 1-line placeholder when there are none),
 # then, when there are background sessions, a 1-line separator and a 3-line
 # block per session (lib/render.sh). The separator and out of range lines

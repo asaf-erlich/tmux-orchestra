@@ -50,7 +50,7 @@ README.md               User-facing installation and quick-start guide
 
 ## tmux option schema (authoritative)
 
-All persistent state is stored as tmux user-options. Window-scoped unless noted. Sidebar state is global (`set-option -g`): there is one sidebar per server.
+All persistent state is stored as tmux user-options. Window-scoped unless noted, or pane-scoped when written with `--pane %N`: the Claude Code hook writes every `@ab_*` option to its own pane (`$TMUX_PANE`), so each Claude pane has its own state and sidebar row. `#{@ab_*}` in formats inherits pane → window → session → global, so a pane without a value of its own shows its window's (OpenCode and the prompt hooks still write window options). The hook clears the agent options (`AB_AGENT_OPTS` in lib/common.sh) on its window at SessionStart and UserPromptSubmit, so state left by the earlier window-scoped version is not inherited. Sidebar state is global (`set-option -g`): there is one sidebar per server.
 
 | Option | Writer | Max | Notes |
 |---|---|---|---|
@@ -73,7 +73,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 | `@orchestra_sidebar_width` | orchestra-toggle, after-resize-pane hook | — | Global: cached pane width |
 | `@orchestra_sidebar_pane_id` | orchestra-toggle | — | Global: the sidebar pane ID |
 | `@orchestra_sidebar_pid` | orchestra-toggle | — | Global: renderer PID |
-| `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (window_id, or `bg:<id>` for a background session); unset = the viewing session's active window |
+| `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (pane_id, or `bg:<id>` for a background session); unset = the viewing session's active window's active Claude pane (else its previously active pane, else its first Claude pane) |
 | `@orchestra_bg_agents` | orchestra-bg-refresh | — | Global: background Claude sessions, `id;state;started_at;cwd;name` records joined by `\|`; unset when none |
 | `@orchestra_bg_id` | window opened by `select_bg_open` | — | Window: the background session id this window runs `claude attach` for |
 | `@orchestra_background` | user | — | Global: `off` hides background sessions |
@@ -97,7 +97,7 @@ orchestra clear-state
 orchestra set-prompt <text>
 ```
 
-All subcommands accept `--window <id>` to target a specific window. Without it, window resolution falls through four steps (see `resolve_window` in [lib/common.sh](lib/common.sh)): explicit flag → `$TMUX_PANE` → `$ORCHESTRA_WINDOW_ID` → current window.
+All subcommands accept `--window <id>` to target a specific window, or `--pane <%id>` to write pane options instead (`resolve_target` in [lib/common.sh](lib/common.sh)); `set_opt` / `clear_opt` / `get_opt` pick `-p` for a `%N` target and `-w` otherwise, and `get_opt` reads the target's own value only. Without either, window resolution falls through four steps (see `resolve_window` in [lib/common.sh](lib/common.sh)): explicit flag → `$TMUX_PANE` → `$ORCHESTRA_WINDOW_ID` → current window.
 
 Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 
@@ -106,13 +106,13 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 - `orchestra-render` runs in the sidebar pane. It reads all window state in **one** tmux call per tick (`tmux display-message ... \; list-panes -a -F '...'`, one line per pane of every session with a Claude flag), then calls `render_frame` (pure, one awk process, in [lib/render.sh](lib/render.sh)). Process creation is slow on some hosts, so keep the tick at one tmux call plus one awk and never fork per window or field.
 - Do not add tmux calls inside `render_rows`/`render_frame` or the awk program — rendering must remain pure.
 - The pipe-delimited format read from tmux is:
-  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude|finished_at|window_activity|session_source|last_prompt`
-  `last_prompt` is last because it may contain `|`; the awk rejoins fields 24 onward.
+  `session_name|window_id|window_name|window_active|state|action|branch|cwd|last_cmd|progress|progress_label|unread|last_notification|phase|phase_icon|phase_color|spinner|selected_window|sidebar_focused|claude|finished_at|window_activity|session_source|pane_id|pane_index|pane_active|last_prompt`
+  `pane_active` is 1 for the window's active pane, 2 for its previously active pane (`pane_last`), else 0. `last_prompt` is last because it may contain `|`; the awk rejoins fields 27 onward. Lines without pane fields (older fixtures) render one block per window.
 - Idle windows show the finish age (`now`, `5m`, `3h`, `2d`, `6w`; from `@ab_finished_at`, else `window_activity`) at the right of the top border: bold under an hour, grey past a day, hidden while running. The last prompt (`❯ …`) takes the activity row when idle and the meta row while running or waiting; an idle window with `@ab_session_source` and no prompt shows a dim `∅ cleared` / `∅ empty session`. The last notification is only a meta-row fallback.
-- Windows from every session are listed, in session-name then window-index order, titled `session:window`; only the sidebar's own session's active window is drawn active. Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
+- Claude panes from every session are listed, one block each, in session-name, window-index then pane-index order, titled `session:window`, or `session:window.<pane_index>` when the window has several Claude panes; only one pane of the sidebar's own session's active window is drawn active: its active pane, else its previously active one, else its first Claude pane. Only panes running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk dedupes pane lines by pane id, and keyboard selection and `orchestra-click` index the same filtered list (Enter and clicks run `select-window` and `select-pane` on the pane, after `switch-client` for another session). Focusing a pane clears its own `@ab_unread` (and its window's).
 - Each state has a color (`state_color` in lib/render.sh): running uses its spinner's color (Claude orange), the rest come from `@orchestra_wait_color`, `@orchestra_background_color`, `@orchestra_compacting_color`, `@orchestra_error_color` and `@orchestra_done_color` (defaults in orchestra.tmux and `set_state_colors`), passed to `render_frame` as header fields 3 and 6-9. Idle windows with an unread finish draw their rows in the done color, with a `✓` under Nerd Fonts.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`, background: `◴◷◶◵`, compacting: `◜◝◞◟`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
-- Stuck states: rejecting a permission prompt or pressing Esc ends a turn with no hook. The same background job first runs `orchestra-claude-hook reconcile`, which clears running/waiting on Claude panes whose `~/.claude/sessions/<pid>.json` has had `status: "idle"` for at least 3 seconds (`statusUpdatedAt`).
+- Stuck states: rejecting a permission prompt or pressing Esc ends a turn with no hook. The same background job first runs `orchestra-claude-hook reconcile`, which clears running/waiting on each Claude pane (its own options, or its window's when it has none) whose `~/.claude/sessions/<pid>.json` has had `status: "idle"` for at least 3 seconds (`statusUpdatedAt`).
 - Background sessions: `claude agents --json` starts a node process, so it never runs on the tick. `orchestra-render` starts `orchestra-bg-refresh` as a background job every `@orchestra_bg_interval` seconds (one at a time); it writes `@orchestra_bg_agents` only when the list changed and then sends SIGUSR1. The tick reads the option as a last `|bg|REC|...` line of the same tmux call. `render_frame` draws a one-line `── background ──` separator and one 3-line `bg_block` per session after the windows (after the one-line placeholder when there are none); `select_row` uses the same geometry, and `select_go` on a `bg:<id>` pick calls `select_bg_open`, which selects the window tagged `@orchestra_bg_id=<id>` or opens a new one running `claude attach <id>`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 

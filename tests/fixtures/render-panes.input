@@ -1,0 +1,5 @@
+40|off|#d29922|dev|1800000000
+dev|@1|build|1|running|Bash: make test||/src/app|||||||||claude|||1||1799999000||%1|0|2|fix the tests
+dev|@1|build|1|waiting|allow? Bash||/src/app|||||||||claude|||1||1799999000||%2|1|0|plan it
+dev|@1|build|1||||||||||||||||0||||%5|2|1|
+dev|@2|api|0||||/src/api||||1|Claude Code: finished|||||||1|1799990000|1799990000||%3|0|1|add retries

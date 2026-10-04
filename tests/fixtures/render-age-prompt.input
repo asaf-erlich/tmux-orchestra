@@ -1,10 +1,10 @@
-dev|@1|build|1|||main|/tmp/project|claude||||||||||||1799999700|1799999990||fix the flaky test | then push
-dev|@2|api|0|running|Bash: make test|||||||||||claude||||1799999900|||add retries to the client
-dev|@3|docs|0||||/tmp/docs|ls|||1||||||||||1799740800||
-dev|@4|infra|0|waiting|Allow Bash?|||||||||||||||1798272000|||plan the migration
-dev|@5|a-window-with-a-very-long-name|0|||feature/long||||||||||||||1799992800|||
-dev|@6|seen|0|running|Read: a.md||||||0|Claude Code: waiting for input||||claude||||1799999000|||summarize the docs
-dev|@7|fresh|0||||/tmp/fresh|claude||||Claude Code: finished|||||||||1799992800|clear|
-dev|@8|old|0||||/tmp/old||||||||||||||1799222400|empty|
-dev|@9|legacy|0||||/tmp/legacy|claude||||Claude Code: finished|||||||||||
-dev|@10|longdir|0||||/src/platform-engineering-domain-and-a-much-longer-tail||||||||||||||||check the rollout
+dev|@1|build|1|||main|/tmp/project|claude||||||||||||1799999700|1799999990|||||fix the flaky test | then push
+dev|@2|api|0|running|Bash: make test|||||||||||claude||||1799999900||||||add retries to the client
+dev|@3|docs|0||||/tmp/docs|ls|||1||||||||||1799740800|||||
+dev|@4|infra|0|waiting|Allow Bash?|||||||||||||||1798272000||||||plan the migration
+dev|@5|a-window-with-a-very-long-name|0|||feature/long||||||||||||||1799992800||||||
+dev|@6|seen|0|running|Read: a.md||||||0|Claude Code: waiting for input||||claude||||1799999000||||||summarize the docs
+dev|@7|fresh|0||||/tmp/fresh|claude||||Claude Code: finished|||||||||1799992800|clear||||
+dev|@8|old|0||||/tmp/old||||||||||||||1799222400|empty||||
+dev|@9|legacy|0||||/tmp/legacy|claude||||Claude Code: finished||||||||||||||
+dev|@10|longdir|0||||/src/platform-engineering-domain-and-a-much-longer-tail|||||||||||||||||||check the rollout

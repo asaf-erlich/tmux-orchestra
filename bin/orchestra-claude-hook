@@ -14,7 +14,7 @@
 #                  PermissionDenied: a rejected tool call; clear state (if
 #                  Claude carries on, its next hook marks running again)
 #   notification   Notification: permission prompts and questions mark the
-#                  window waiting; the idle reminder Claude sends a minute
+#                  pane waiting; the idle reminder Claude sends a minute
 #                  after a turn ends does not (the turn is over, not blocked)
 #   stop           Stop: done, finish time, unread unless you are looking;
 #                  "background" instead while background tasks (agents,
@@ -28,12 +28,19 @@
 #                  session marker; resume restores the last prompt
 #   session-end    SessionEnd: clear state
 #   reconcile      Not a hook; bin/orchestra-render runs it with the
-#                  background refresh. Clears running/waiting on Claude panes
-#                  whose session reports idle: rejecting a permission prompt
-#                  or pressing Esc ends the turn with no hook at all.
+#                  background refresh. Clears running/waiting on each Claude
+#                  pane whose own session reports idle: rejecting a
+#                  permission prompt or pressing Esc ends the turn with no
+#                  hook at all.
 #   backfill       Not a hook. Fill prompt, finish time and empty-session
 #                  marker for Claude panes already running, from
 #                  ~/.claude/sessions/<pid>.json and the session transcript.
+#
+# State is written as pane options on the Claude pane ($TMUX_PANE, through
+# `orchestra --pane`), so several Claude sessions in one window keep their
+# own rows; without $TMUX_PANE it falls back to the window. Session start
+# and each prompt clear what an earlier, window-scoped version left on the
+# window, which every pane would otherwise inherit.
 #
 # Requires jq. Always exits 0 so a hook never blocks Claude.
 
@@ -73,15 +80,16 @@ mtime() {
 }
 
 event_prompt() {
+    migrate_window
     prompt=$(field .prompt)
     # Claude Code submits background-task results as a prompt wrapped in
     # tags (<task-notification>...); keep the last prompt you typed.
     case "$prompt" in
         '<'*) ;;
-        *) orchestra set-prompt "$prompt" --window "$target" ;;
+        *) orchestra set-prompt "$prompt" "$scope" "$target" ;;
     esac
     clear_opt "$target" '@ab_session_source'
-    orchestra set-state running --spinner claude --action thinking --window "$target"
+    orchestra set-state running --spinner claude --action thinking "$scope" "$target"
 }
 
 event_pre_tool() {
@@ -89,25 +97,35 @@ event_pre_tool() {
         // .tool_input.file_path // .tool_input.pattern // .tool_input.url
         // .tool_input.prompt // (.tool_input | tostring)) | tostring
         | gsub("\\s+"; " ") | .[0:100])')
-    orchestra set-state running --spinner claude --action "${action:-working}" --window "$target"
+    orchestra set-state running --spinner claude --action "${action:-working}" "$scope" "$target"
 }
 
 # Back to running after an approved permission prompt; any other state is
 # left alone (a later PreToolUse or Stop moves it on).
 event_post_tool() {
     [ "$(get_opt "$target" '@ab_agent_state')" = 'waiting' ] || return 0
-    orchestra set-state running --spinner claude --action "$(field .tool_name): done" --window "$target"
+    orchestra set-state running --spinner claude --action "$(field .tool_name): done" "$scope" "$target"
 }
 
 # No Stop hook runs after an interrupt, so without this the window would
 # keep showing the last state (red, after rejecting a permission prompt).
 event_turn_aborted() {
-    orchestra clear-state --window "$target"
+    orchestra clear-state "$scope" "$target"
 }
 
-# True when an attached client is showing the target window.
+# True when an attached client is showing the target: its window is the
+# session's active window and, for a pane, it is that window's active pane.
 looking() {
-    [ "$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)" = 1 ]
+    [ "$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{&&:#{session_attached},#{pane_active}}}' 2>/dev/null)" = 1 ]
+}
+
+# State lives on the Claude pane, and pane options win over window options,
+# but a pane without a value of its own shows its window's: drop whatever an
+# earlier version (window-scoped) left on the window when a session starts or
+# a turn begins.
+migrate_window() {
+    [ "$scope" = '--pane' ] || return 0
+    clear_window_agent_opts "$target"
 }
 
 event_notification() {
@@ -120,15 +138,15 @@ event_notification() {
             # "Claude needs your permission to use Bash".
             pending=$(get_opt "$target" '@ab_current_action')
             [ "$pending" = 'thinking' ] && pending=''
-            orchestra set-state waiting --spinner claude --action "allow? ${pending:-$message}" --window "$target"
+            orchestra set-state waiting --spinner claude --action "allow? ${pending:-$message}" "$scope" "$target"
             ;;
         *)
-            orchestra set-state waiting --spinner claude --action "${message:-needs input}" --window "$target"
+            orchestra set-state waiting --spinner claude --action "${message:-needs input}" "$scope" "$target"
             ;;
     esac
     # Unread means "needs you while you were elsewhere": skip it for the
-    # window an attached client is showing.
-    looking || orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" --window "$target"
+    # pane an attached client is showing.
+    looking || orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" "$scope" "$target"
 }
 
 # Stop lists the session's background tasks; finished ones may linger in
@@ -148,49 +166,50 @@ event_stop() {
     # finishes, so this is not "finished" yet.
     pending=$(background_summary)
     if [ -n "$pending" ]; then
-        orchestra set-state background --spinner claude --action "$pending" --window "$target"
+        orchestra set-state background --spinner claude --action "$pending" "$scope" "$target"
         return 0
     fi
-    orchestra set-state 'done' --window "$target"
-    orchestra clear-state --window "$target"
+    orchestra set-state 'done' "$scope" "$target"
+    orchestra clear-state "$scope" "$target"
     # Unread means "finished while you were elsewhere": skip it for the
-    # window an attached client is showing.
-    looking || orchestra notify --quiet --title 'Claude Code' --body 'finished' --window "$target"
+    # pane an attached client is showing.
+    looking || orchestra notify --quiet --title 'Claude Code' --body 'finished' "$scope" "$target"
 }
 
 event_stop_failure() {
     error=$(field .error)
-    orchestra set-state error --spinner claude --action "error: ${error:-unknown}" --window "$target"
-    looking || orchestra notify --quiet --title 'Claude Code' --body "stopped: ${error:-error}" --window "$target"
+    orchestra set-state error --spinner claude --action "error: ${error:-unknown}" "$scope" "$target"
+    looking || orchestra notify --quiet --title 'Claude Code' --body "stopped: ${error:-error}" "$scope" "$target"
 }
 
 event_pre_compact() {
     trigger=$(field .trigger)
-    orchestra set-state compacting --spinner claude --action "compacting${trigger:+ ($trigger)}" --window "$target"
+    orchestra set-state compacting --spinner claude --action "compacting${trigger:+ ($trigger)}" "$scope" "$target"
 }
 
 event_post_compact() {
     if [ "$(field .trigger)" = 'manual' ]; then
-        orchestra clear-state --window "$target"
+        orchestra clear-state "$scope" "$target"
     else
-        orchestra set-state running --spinner claude --action 'compacted' --window "$target"
+        orchestra set-state running --spinner claude --action 'compacted' "$scope" "$target"
     fi
 }
 
 event_session_start() {
     source=$(field .source)
     [ "$source" = 'compact' ] && return 0
-    orchestra clear-state --window "$target"
+    migrate_window
+    orchestra clear-state "$scope" "$target"
     case "$source" in
         clear|startup)
-            orchestra set-prompt '' --window "$target"
+            orchestra set-prompt '' "$scope" "$target"
             clear_opt "$target" '@ab_finished_at'
             clear_opt "$target" '@ab_last_notification'
             set_opt "$target" '@ab_session_source' "$source"
             ;;
         *)
             prompt=$(last_prompt "$(field .transcript_path)")
-            orchestra set-prompt "$prompt" --window "$target"
+            orchestra set-prompt "$prompt" "$scope" "$target"
             clear_opt "$target" '@ab_session_source'
             ;;
     esac
@@ -205,17 +224,19 @@ claude_session_file() {
 }
 
 backfill() {
-    tmux list-panes -a -F "#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
-    while IFS='|' read -r window pane_pid is_claude state; do
+    tmux list-panes -a -F "#{pane_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
+    while IFS='|' read -r pane pane_pid is_claude state; do
         [ "$is_claude" = 1 ] || continue
+        # Window-scoped state from an earlier version would shadow the pane.
+        clear_window_agent_opts "$pane"
         if ! session_file=$(claude_session_file "$pane_pid"); then
             # `claude agents` (the background-agent manager) has no session.
             case " $(ps -o command= -p "$pane_pid" 2>/dev/null) $(pgrep -lfP "$pane_pid" 2>/dev/null) " in
                 *' agents '*)
-                    set_opt "$window" '@ab_session_source' 'agents'
-                    clear_opt "$window" '@ab_last_prompt'
-                    clear_opt "$window" '@ab_last_notification'
-                    printf '%s (agents view)\n' "$window"
+                    set_opt "$pane" '@ab_session_source' 'agents'
+                    clear_opt "$pane" '@ab_last_prompt'
+                    clear_opt "$pane" '@ab_last_notification'
+                    printf '%s (agents view)\n' "$pane"
                     ;;
             esac
             continue
@@ -227,29 +248,29 @@ backfill() {
         prompt=''
         [ -n "$transcript" ] && prompt=$(last_prompt "$transcript")
         if [ -n "$prompt" ]; then
-            set_opt "$window" '@ab_last_prompt' "$prompt"
-            clear_opt "$window" '@ab_session_source'
+            set_opt "$pane" '@ab_last_prompt' "$prompt"
+            clear_opt "$pane" '@ab_session_source'
         else
-            clear_opt "$window" '@ab_last_prompt'
-            set_opt "$window" '@ab_session_source' 'empty'
+            clear_opt "$pane" '@ab_last_prompt'
+            set_opt "$pane" '@ab_session_source' 'empty'
         fi
         [ "$status" = 'idle' ] || continue
         # Idle: any state left is stale (the idle reminder's "waiting", a
         # "running" whose Stop hook predates this script); the transcript's
         # last write is when the turn ended.
         if [ -n "$state" ]; then
-            clear_opt "$window" '@ab_agent_state'
-            clear_opt "$window" '@ab_current_action'
-            clear_opt "$window" '@ab_spinner'
+            clear_opt "$pane" '@ab_agent_state'
+            clear_opt "$pane" '@ab_current_action'
+            clear_opt "$pane" '@ab_spinner'
         fi
-        case "$(get_opt "$window" '@ab_last_notification')" in
-            *'waiting for input'*) clear_opt "$window" '@ab_last_notification' ;;
+        case "$(get_opt "$pane" '@ab_last_notification')" in
+            *'waiting for input'*) clear_opt "$pane" '@ab_last_notification' ;;
         esac
         if [ -n "$transcript" ] && [ -n "$prompt" ]; then
             finished=$(mtime "$transcript")
-            [ -n "$finished" ] && set_opt "$window" '@ab_finished_at' "$finished"
+            [ -n "$finished" ] && set_opt "$pane" '@ab_finished_at' "$finished"
         fi
-        printf '%s %s\n' "$window" "${prompt:-(empty session)}" | cut -c 1-100
+        printf '%s %s\n' "$pane" "${prompt:-(empty session)}" | cut -c 1-100
     done
 }
 
@@ -259,19 +280,29 @@ backfill() {
 reconcile() {
     command -v jq >/dev/null 2>&1 || return 0
     now_ms=$(($(date +%s) * 1000))
-    tmux list-panes -a -F "#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
-    while IFS='|' read -r window pane_pid is_claude state; do
+    # Each Claude pane has its own session file and its own state. A pane
+    # with no state of its own shows its window's (an earlier version, or a
+    # window-scoped `orchestra set-state`); that is cleared on the window.
+    tmux list-panes -a -F "#{pane_id}|#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
+    while IFS='|' read -r pane window pane_pid is_claude state; do
         [ "$is_claude" = 1 ] || continue
         case "$state" in running|waiting) ;; *) continue ;; esac
         session_file=$(claude_session_file "$pane_pid") || continue
         idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
-        case "$idle_since" in ''|*[!0-9]*) continue ;; esac
+        case "$idle_since" in
+            ''|*[!0-9]*) continue ;;
+        esac
         [ $((now_ms - idle_since)) -ge 3000 ] || continue
-        # Rejecting the prompt or pressing Esc means you were at the window:
-        # drop the unread its permission notification left, or the window
-        # would read "finished, not yet seen".
-        orchestra clear-state --window "$window"
-        clear_opt "$window" '@ab_unread'
+        if [ -n "$(get_opt "$pane" '@ab_agent_state')" ]; then
+            orchestra clear-state --pane "$pane"
+            clear_opt "$pane" '@ab_unread'
+        else
+            orchestra clear-state --window "$window"
+            clear_opt "$window" '@ab_unread'
+        fi
+        # Rejecting the prompt or pressing Esc means you were at the pane:
+        # the unread its permission notification left is dropped above, or
+        # the pane would read "finished, not yet seen".
     done
 }
 
@@ -283,7 +314,16 @@ esac
 
 input=$(cat)
 command -v jq >/dev/null 2>&1 || exit 0
-target=$(resolve_window '' 2>/dev/null) || exit 0
+# State goes on the Claude pane, so two Claude sessions split in one window
+# keep their own rows; without a pane (not run by Claude in tmux), the
+# window as before.
+if [ -n "${TMUX_PANE:-}" ] && pane_exists "$TMUX_PANE"; then
+    target=$TMUX_PANE
+    scope=--pane
+else
+    target=$(resolve_window '' 2>/dev/null) || exit 0
+    scope=--window
+fi
 [ -n "$target" ] || exit 0
 
 case "$event" in
@@ -299,6 +339,6 @@ case "$event" in
     pre-compact) event_pre_compact ;;
     post-compact) event_post_compact ;;
     session-start) event_session_start ;;
-    session-end) orchestra clear-state --window "$target" ;;
+    session-end) orchestra clear-state "$scope" "$target" ;;
 esac
 exit 0

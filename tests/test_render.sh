@@ -145,6 +145,28 @@ check_background() {
 }
 check_background
 
+# Per-pane rows (fields 24-26: pane_id, pane_index, active flag): a window
+# with two Claude panes gets one block per pane, titled with the pane index;
+# a window with one keeps the plain title. The active window's active pane
+# runs no Claude (the sidebar), so its previously active pane (flag 2) is
+# drawn active. The keyboard selection holds a pane id.
+check_panes() {
+    actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-panes.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-panes.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame panes mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    # Field 18 (@orchestra_selected_window) set to SEL; prints the titles.
+    selected_titles() {
+        awk -v sel="$1" 'BEGIN { FS = OFS = "|" } NR > 1 { $18 = sel } { print }' "$REPO_DIR/tests/fixtures/render-panes.input" |
+            NO_COLOR=1 TERM=xterm render_frame 0 | grep -e '^▌━ ' -e '^▌─ '
+    }
+    actual=$(selected_titles '%2')
+    case "$actual" in '▌─ dev:build.1 '*) ;; *) printf 'render_frame pane selection: %s\n' "$actual" >&2; exit 1 ;; esac
+}
+check_panes
+
 check_inactive_border_color() {
     tmp_output=$(mktemp "${TMPDIR:-/tmp}/orchestra-render.XXXXXX")
     trap 'rm -f "$tmp_output"' EXIT INT TERM

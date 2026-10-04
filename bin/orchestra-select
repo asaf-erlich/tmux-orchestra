@@ -3,12 +3,12 @@
 # Usage: orchestra-select <up|down|enter|reset> <session>
 #
 # <session> is the viewing session (the sidebar's). The selection walks the
-# Claude windows of every session and is stored as a window_id in the global
+# Claude panes of every session and is stored as a pane_id in the global
 # option @orchestra_selected_window so it survives window reordering. An
-# unset or stale value means "the viewing session's active window". up/down
-# move it (clamped at the ends) without switching windows; enter shows it,
-# the same effect as a click (select-window, or switch-client -c for a window
-# in another session); reset clears it. The sidebar's key reader does not run this: it
+# unset or stale value means "the viewing session's active Claude pane".
+# up/down move it (clamped at the ends) without switching windows; enter
+# shows it, the same effect as a click (select-window and select-pane, after
+# switch-client -c for a pane in another session); reset clears it. The sidebar's key reader does not run this: it
 # sources lib/select.sh directly.
 set -eu
 

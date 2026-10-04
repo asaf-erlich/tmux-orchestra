@@ -57,12 +57,12 @@ done
 notify_renderer='pid=$(tmux show-option -gvq @orchestra_sidebar_pid); [ -n "$pid" ] && kill -USR1 "$pid" 2>/dev/null || true'
 
 # Keep discovery env vars fresh and clear unread state when the user returns to
-# a window. Any focus change also drops the sidebar's keyboard selection, so it
+# a pane (the pane's own, and its window's from window-scoped writers). Any focus change also drops the sidebar's keyboard selection, so it
 # starts on the active window each time the sidebar gains focus. The hook also
 # nudges the renderer so both changes show immediately instead of waiting for
 # the next poll tick, and moves the sidebar into the focused window, whatever
 # its session.
-tmux set-hook -g pane-focus-in "run-shell 'tmux set-option -wq -t \"#{window_id}\" @ab_unread \"\" >/dev/null 2>&1 || true; tmux set-option -gqu @orchestra_selected_window >/dev/null 2>&1 || true; tmux set-environment -t \"#{session_name}\" ORCHESTRA_WINDOW_ID \"#{window_id}\"; tmux set-environment -t \"#{session_name}\" ORCHESTRA_PANE_ID \"#{pane_id}\"; $notify_renderer; \"$CURRENT_DIR/bin/orchestra-follow\" \"#{window_id}\" \"#{pane_id}\"'"
+tmux set-hook -g pane-focus-in "run-shell 'tmux set-option -wq -t \"#{window_id}\" @ab_unread \"\" \\; set-option -pqu -t \"#{pane_id}\" @ab_unread \\; set-option -gqu @orchestra_selected_window >/dev/null 2>&1 || true; tmux set-environment -t \"#{session_name}\" ORCHESTRA_WINDOW_ID \"#{window_id}\"; tmux set-environment -t \"#{session_name}\" ORCHESTRA_PANE_ID \"#{pane_id}\"; $notify_renderer; \"$CURRENT_DIR/bin/orchestra-follow\" \"#{window_id}\" \"#{pane_id}\"'"
 tmux set-hook -g window-renamed "run-shell '$notify_renderer'"
 # A client switching sessions (switch-client from the sidebar, byobu's session
 # keys, choose-tree) brings the sidebar to the new session's active pane. The
