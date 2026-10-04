@@ -20,11 +20,13 @@ with upstream, it:
   separator, and opens one in a new window with `claude attach` on Enter or a
   click
 - always puts the sidebar at the **left edge of the window, full height**,
-  whichever pane is focused (not between side-by-side panes)
+  whichever pane is focused (not between side-by-side panes), and gives each
+  window its pane sizes back when the sidebar leaves or closes
 - keeps **one sidebar per tmux server**, listing Claude windows from every
   session and switching your client on Enter or a click
 - gives **each Claude pane its own row**, so two Claude sessions split into
-  one window no longer share (and overwrite) one state
+  one window no longer share (and overwrite) one state; they are numbered
+  `.1`, `.2` in pane order, stable wherever the sidebar is
 - lists **only windows running Claude Code**, so stale state never shows
 - adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
 - shows each window's **finish age**, **last prompt** and an

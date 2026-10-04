@@ -585,6 +585,61 @@ sidebar=$(tmux show-options -gqv @orchestra_sidebar_pane_id)
 assert_eq ok "$(sidebar_at_left_edge "$sidebar")" 'toggle from a right-hand pane opens the sidebar at the left edge, full height'
 TMUX_PANE=$w1_second orchestra-toggle
 
+# Entering a window takes the sidebar's columns from all its panes; leaving
+# gives them to the left-most one. Without restoring the layout, each visit
+# moved width from the right pane to the left. Two background windows with
+# two side-by-side panes each: following in and out and toggling open and
+# closed leave both panes' widths as they were.
+pane_widths() {
+    tmux list-panes -t "$1" -F '#{pane_id}:#{pane_width}' | tr '\n' ' '
+}
+drift_a=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+tmux split-window -d -h -t "$drift_a"
+drift_b=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+tmux split-window -d -h -t "$drift_b"
+drift_a_pane=$(tmux display-message -p -t "$drift_a" '#{pane_id}')
+drift_b_pane=$(tmux display-message -p -t "$drift_b" '#{pane_id}')
+widths_a=$(pane_widths "$drift_a")
+widths_b=$(pane_widths "$drift_b")
+TMUX_PANE=$drift_a_pane orchestra-toggle
+sidebar=$(tmux show-options -gqv @orchestra_sidebar_pane_id)
+assert_eq "orchestra-tests|$drift_a" "$(where_pane "$sidebar")" 'toggle opens the sidebar in a background window'
+for _ in 1 2 3; do
+    orchestra-follow "$drift_b" "$drift_b_pane"
+    assert_eq "orchestra-tests|$drift_b" "$(where_pane "$sidebar")" 'follow moves the sidebar to the second window'
+    assert_eq "$widths_a" "$(pane_widths "$drift_a")" 'the sidebar leaving a window restores its pane widths'
+    orchestra-follow "$drift_a" "$drift_a_pane"
+    assert_eq "$widths_b" "$(pane_widths "$drift_b")" 'the sidebar leaving the second window restores its pane widths'
+done
+TMUX_PANE=$drift_a_pane orchestra-toggle
+assert_eq "$widths_a" "$(pane_widths "$drift_a")" 'closing the sidebar restores the pane widths'
+for _ in 1 2 3; do
+    TMUX_PANE=$drift_a_pane orchestra-toggle
+    TMUX_PANE=$drift_a_pane orchestra-toggle
+done
+assert_eq "$widths_a" "$(pane_widths "$drift_a")" 'toggling the sidebar open and closed keeps the pane widths'
+assert_eq '' "$(tmux show-options -wqv -t "$drift_a" @orchestra_layout_before)$(tmux show-options -wqv -t "$drift_a" @orchestra_layout_with)" 'closing the sidebar drops the saved layouts'
+
+# A window resized while the sidebar is in it keeps the user's sizes: the
+# saved layout no longer matches and is dropped, not applied.
+TMUX_PANE=$drift_a_pane orchestra-toggle
+sidebar=$(tmux show-options -gqv @orchestra_sidebar_pane_id)
+tmux resize-pane -t "$drift_a_pane" -L 3
+orchestra-follow "$drift_b" "$drift_b_pane"
+assert_eq "orchestra-tests|$drift_b" "$(where_pane "$sidebar")" 'the sidebar left the resized window'
+[ "$(pane_widths "$drift_a")" != "$widths_a" ] || { printf 'assertion failed: a window resized under the sidebar was reset to its old layout\n' >&2; exit 1; }
+assert_eq '' "$(tmux show-options -wqv -t "$drift_a" @orchestra_layout_before)" 'a stale saved layout is dropped'
+
+# The sidebar alone in its own window: following closes that window, and
+# the next window still gets its layout back afterwards.
+tmux break-pane -d -s "$sidebar"
+widths_b=$(pane_widths "$drift_b")
+orchestra-follow "$drift_b" "$drift_b_pane"
+assert_eq "orchestra-tests|$drift_b" "$(where_pane "$sidebar")" 'follow moves the sidebar out of a window it was alone in'
+TMUX_PANE=$drift_b_pane orchestra-toggle
+assert_eq "$widths_b" "$(pane_widths "$drift_b")" 'the pane widths are restored after the sidebar came from a closed window'
+tmux kill-window -t "$drift_a" \; kill-window -t "$drift_b"
+
 # Migration: per-session sidebar options from earlier versions are dropped
 # when the plugin loads.
 tmux set-option -q -t other @ab_sidebar_pane_id '%9999' \; set-option -q -t other @ab_width 40 \; \

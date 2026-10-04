@@ -16,14 +16,28 @@ All of them are on the `fix-pane-exists` branch.
   `-f`, so it spans the window's full height at the far left whichever
   pane is focused.
 
+### Fixed
+
+- **Pane sizes no longer drift as the sidebar comes and goes.** Entering a
+  window took the sidebar's columns from all its panes, and leaving gave
+  them all to the left-most one, so every follow or toggle moved width
+  from the right pane to the left. The sidebar now saves the window's
+  layout when it enters (`@orchestra_layout_before` /
+  `@orchestra_layout_with`) and puts it back with `select-layout` when it
+  leaves, unless you resized or added or removed panes meanwhile.
+- **Row numbers for split Claude panes stay put.** Rows were titled with
+  the pane index, which shifted by one whenever the left-edge sidebar
+  (pane 0) entered or left the window. They are now numbered `.1`, `.2`
+  by position among the window's Claude panes.
+
 ### Added
 
 - **A row for each Claude pane.** Two Claude Code sessions split into one
   window used to share that window's state (the last hook to write won)
   and one sidebar row. The Claude Code hook now writes its state to its
   own pane, and the sidebar draws one row per Claude pane, titled
-  `session:window.<pane index>` when a window has several (a window with
-  one keeps `session:window`). Enter or a click selects that pane, also
+  `session:window.<n>` (1, 2, ... in pane order) when a window has
+  several (a window with one keeps `session:window`). Enter or a click selects that pane, also
   from another window (the focus hook no longer moves focus back to the
   window's previously active pane). Every
   `orchestra` subcommand takes `--pane %N` to write pane options; without

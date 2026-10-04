@@ -194,6 +194,52 @@ pane_exists() {
     [ -n "$(tmux display-message -p -t "$1" '#{pane_id}' 2>/dev/null)" ]
 }
 
+# The sidebar sits at a window's left edge (-f). Entering takes its columns
+# from every cell of the window; leaving gives them all to the left-most
+# cell, so each visit would move width from the right panes to the left
+# ones. To stay net-neutral, entering records the window's layout from just
+# before and just after (window options @orchestra_layout_before and
+# @orchestra_layout_with) and leaving puts the "before" layout back, but only
+# if the window still has the exact "with" layout (pane ids, sizes): if the
+# user resized or added or removed panes meanwhile, the saved layout no
+# longer applies and is just dropped. select-layout assigns cells in order,
+# so it needs the same panes; the "with" match guarantees that.
+
+# Usage: sidebar_layout_save WINDOW BEFORE
+# Call after the sidebar entered WINDOW, whose layout was BEFORE.
+sidebar_layout_save() {
+    _sl_with=$(tmux display-message -p -t "$1" '#{window_layout}' 2>/dev/null) || return 0
+    [ -n "$_sl_with" ] && [ -n "$2" ] || return 0
+    tmux set-option -wq -t "$1" @orchestra_layout_before "$2" \; \
+        set-option -wq -t "$1" @orchestra_layout_with "$_sl_with" >/dev/null 2>&1 || true
+}
+
+# display-message format giving "window_id|LAYOUT|WITH|BEFORE": a window's
+# current layout and the two saved ones. Layouts never contain "|".
+# shellcheck disable=SC2034 # Read by orchestra-follow and orchestra-toggle.
+SIDEBAR_LAYOUT_FORMAT='#{window_id}|#{window_layout}|#{@orchestra_layout_with}|#{@orchestra_layout_before}'
+
+# Usage: sidebar_layout_restore INFO
+# Call after the sidebar left a window, with INFO the SIDEBAR_LAYOUT_FORMAT
+# line read for that window while the sidebar was still in it. A window that
+# closed when the sidebar left (it was its only pane) fails silently.
+sidebar_layout_restore() {
+    _sl_win=${1%%|*}
+    _sl_rest=${1#*|}
+    _sl_now=${_sl_rest%%|*}
+    _sl_rest=${_sl_rest#*|}
+    _sl_with=${_sl_rest%%|*}
+    _sl_before=${_sl_rest#*|}
+    [ -n "$_sl_win" ] || return 0
+    if [ -n "$_sl_before" ] && [ "$_sl_now" = "$_sl_with" ]; then
+        tmux select-layout -t "$_sl_win" "$_sl_before" \; \
+            set-option -wqu -t "$_sl_win" @orchestra_layout_before \; \
+            set-option -wqu -t "$_sl_win" @orchestra_layout_with >/dev/null 2>&1 && return 0
+    fi
+    tmux set-option -wqu -t "$_sl_win" @orchestra_layout_before \; \
+        set-option -wqu -t "$_sl_win" @orchestra_layout_with >/dev/null 2>&1 || true
+}
+
 sanitize_status_key() {
     case "$1" in
         ''|*[!A-Za-z0-9_]*)

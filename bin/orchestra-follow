@@ -36,7 +36,10 @@ width=${opts%%|*}
 
 # Which window currently hosts the sidebar? If the pane is gone (killed by
 # hand, its window closed), forget it so toggle opens a fresh one.
-sidebar_window=$(tmux display-message -p -t "$sidebar_pane" '#{window_id}' 2>/dev/null) || sidebar_window=''
+# The same call reads the window's layout and the layouts saved when the
+# sidebar entered it (sidebar_layout_restore in lib/common.sh).
+old_layout=$(tmux display-message -p -t "$sidebar_pane" "$SIDEBAR_LAYOUT_FORMAT" 2>/dev/null) || old_layout=''
+sidebar_window=${old_layout%%|*}
 if [ -z "$sidebar_window" ]; then
     tmux set-option -gqu @orchestra_sidebar_pane_id \; set-option -gqu @orchestra_sidebar_pid >/dev/null 2>&1 || true
     exit 0
@@ -54,7 +57,9 @@ fi
 # active pane, and a select-pane in the same command (a sidebar click or
 # Enter on another pane of that window) has already moved focus on by the
 # time this runs. Selecting the stale pane would undo that pick.
-active_pane=$(tmux display-message -p -t "$current_window" '#{pane_id}' 2>/dev/null) || exit 0
+active_info=$(tmux display-message -p -t "$current_window" '#{pane_id}|#{window_layout}' 2>/dev/null) || exit 0
+active_pane=${active_info%%|*}
+layout_before=${active_info#*|}
 if [ -z "$target_pane" ] || [ "$(tmux display-message -p -t "$target_pane" '#{pane_active}' 2>/dev/null)" != 1 ]; then
     target_pane=$active_pane
 fi
@@ -71,7 +76,12 @@ esac
 # Move the sidebar pane to the left edge of the current window, full height
 # (-f), whichever pane is focused.
 # If the source window contained only this pane, tmux closes that window.
-tmux move-pane -dfhb -l "$width" -s "$sidebar_pane" -t "$target_pane" >/dev/null 2>&1 || true
+tmux move-pane -dfhb -l "$width" -s "$sidebar_pane" -t "$target_pane" >/dev/null 2>&1 || exit 0
+
+# Give the old window back the layout it had before the sidebar came, and
+# remember this one's, so visits do not shift width between its panes.
+sidebar_layout_restore "$old_layout"
+sidebar_layout_save "$current_window" "$layout_before"
 
 # Return focus to the main content pane, not the sidebar. move-pane -d leaves
 # the active pane alone, so only select when needed; every select-pane is
