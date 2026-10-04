@@ -30,7 +30,9 @@ with upstream, it:
   (purple), stopped on an API error (yellow), finished unread (green)
 - redraws about **9x faster** (one tmux call and one awk pass per frame)
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
-  stuck after its pane closed, and tmux.conf options being overwritten
+  stuck after its pane closed, tmux.conf options being overwritten, and a
+  window that stayed red (or kept spinning) after you rejected a permission
+  prompt or pressed Esc
 
 See [CHANGELOG.md](CHANGELOG.md) for details.
 

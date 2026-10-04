@@ -78,6 +78,23 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **Window stuck red after rejecting a permission prompt.** Rejecting a
+  prompt, or pressing Esc, ends the turn without running any Claude Code
+  hook, so the window kept showing "allow? ..." (or the spinner) until the
+  next prompt. The sidebar's background refresh now runs
+  `orchestra-claude-hook reconcile`, which clears a running or waiting
+  window once Claude's session file has reported `idle` for 3 seconds; the
+  window goes idle within about `@orchestra_bg_interval` seconds (default
+  10). New `post-tool`, `tool-failure` and `permission-denied` events
+  (hooks `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` in the
+  template) also turn an approved prompt back to running as soon as the
+  tool runs.
+- **Rejected prompt left the window green.** A permission prompt marked the
+  window unread even while you were looking at it, so once it cleared the
+  window showed the green "finished, not yet seen" check. The Notification
+  hook now skips the unread mark for the window an attached client is
+  showing, as Stop already did, and reconcile drops the unread when it
+  clears a window.
 - **Focus loop that could crash the terminal.** `orchestra-follow` resolved
   the "current" window against whichever client tmux picked, which could
   make focus hooks fire each other in a loop. In one case iTerm2 grew to
