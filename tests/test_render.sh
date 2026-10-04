@@ -20,6 +20,8 @@ compare_fixture "$REPO_DIR/tests/fixtures/render-idle.input" "$REPO_DIR/tests/fi
 compare_fixture "$REPO_DIR/tests/fixtures/render-running.input" "$REPO_DIR/tests/fixtures/render-running.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-waiting.input" "$REPO_DIR/tests/fixtures/render-waiting.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-unread.input" "$REPO_DIR/tests/fixtures/render-unread.expected"
+# Background work, compaction and an API error each get their own glyph.
+compare_fixture "$REPO_DIR/tests/fixtures/render-states.input" "$REPO_DIR/tests/fixtures/render-states.expected"
 # Keyboard selection on the second (inactive) window: bar on its left edge,
 # active window keeps its heavy border. Trailing input fields are ignored.
 compare_fixture "$REPO_DIR/tests/fixtures/render-selected.input" "$REPO_DIR/tests/fixtures/render-selected.expected" '@2'
@@ -193,6 +195,20 @@ check_cwd_label() {
 check_cwd_label '/tmp/project' 'project'
 check_cwd_label '/tmp/abcdefghijklmnopq' 'abcdefghijklmnopq'
 check_cwd_label '/' '/'
+
+check_glyph() {
+    actual=$(render_state_glyph "$1" "$2" "$3")
+    [ "$actual" = "$4" ] || {
+        printf 'glyph %s frame %d nerd %s: expected "%s" got "%s"\n' "$1" "$2" "$3" "$4" "$actual" >&2
+        exit 1
+    }
+}
+check_glyph background 1 on '◷'
+check_glyph background 1 off '&'
+check_glyph compacting 0 on '◜'
+check_glyph compacting 0 off '='
+check_glyph error 0 on '✗'
+check_glyph error 0 off 'X'
 
 check_spinner() {
     name=$1; frame=$2; expected=$3

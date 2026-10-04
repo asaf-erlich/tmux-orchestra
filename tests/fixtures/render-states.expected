@@ -1,0 +1,9 @@
+┌─ api ─────────────────────────────────
+│& 2 background: Run the test suite
+│ 
+┌─ web ─────────────────────────────────
+│= compacting (auto)
+│ 
+┏━ cli ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃X error: rate_limit
+┃ stopped: rate_limit

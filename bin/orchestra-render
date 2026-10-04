@@ -32,7 +32,7 @@ sleep_interruptible() {
 
 redraw() {
     # One tmux call: the sidebar pane's own width (tput cols inside $(...)
-    # sees no terminal and reports 80), the two global options and the
+    # sees no terminal and reports 80), the global options and the
     # sidebar's session (whose active window is the one the viewing client
     # shows), then one line per pane of every session. Fields 18-20 carry
     # @orchestra_selected_window, whether the sidebar has focus (it is the
@@ -42,7 +42,7 @@ redraw() {
     # prompt (last, as it may contain "|"). The last line, "|bg|...", is
     # @orchestra_bg_agents. render_frame shows one block per window with a
     # Claude pane, then the background sessions.
-    if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}' \; \
+    if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}||#{@orchestra_background_color}|#{@orchestra_compacting_color}|#{@orchestra_error_color}|#{@orchestra_done_color}' \; \
         list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{@ab_last_prompt}" \; \
         display-message -p '|bg|#{@orchestra_bg_agents}' 2>/dev/null); then
         :

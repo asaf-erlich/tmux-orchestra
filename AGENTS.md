@@ -54,7 +54,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted.
 
 | Option | Writer | Max | Notes |
 |---|---|---|---|
-| `@ab_agent_state` | harness hook | — | `running` \| `waiting` \| `done` \| empty |
+| `@ab_agent_state` | harness hook | — | `running` \| `waiting` \| `background` \| `compacting` \| `error` \| `done` \| empty |
 | `@ab_current_action` | harness hook | 120 chars | Tool name or prompt text |
 | `@ab_last_prompt` | `orchestra set-prompt` | 120 chars | Last prompt sent to the agent; survives `clear-state` |
 | `@ab_session_source` | `orchestra-claude-hook` | — | `clear` \| `startup` \| `empty` \| `agents` while no prompt since then; unset after a prompt |
@@ -92,7 +92,7 @@ orchestra list-status
 orchestra set-progress <float> [--label TEXT]
 orchestra clear-progress
 orchestra notify --title T [--body B] [--subtitle S] [--quiet]
-orchestra set-state <running|waiting|done> [--action TEXT]
+orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT]
 orchestra clear-state
 orchestra set-prompt <text>
 ```
@@ -110,7 +110,8 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
   `last_prompt` is last because it may contain `|`; the awk rejoins fields 24 onward.
 - Idle windows show the finish age (`now`, `5m`, `3h`, `2d`, `6w`; from `@ab_finished_at`, else `window_activity`) at the right of the top border: bold under an hour, grey past a day, hidden while running. The last prompt (`❯ …`) takes the activity row when idle and the meta row while running or waiting; an idle window with `@ab_session_source` and no prompt shows a dim `∅ cleared` / `∅ empty session`. The last notification is only a meta-row fallback.
 - Windows from every session are listed, in session-name then window-index order, titled `session:window`; only the sidebar's own session's active window is drawn active. Only windows with a pane running Claude Code are listed (`pane_current_command` is the version-named binary, e.g. `2.1.280`, or `claude`). The filter lives in one place, `ORCHESTRA_CLAUDE_PANE` / `select_windows` in [lib/select.sh](lib/select.sh); the render awk aggregates pane lines per window, and keyboard selection and `orchestra-click` index the same filtered list.
-- Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
+- Each state has a color (`state_color` in lib/render.sh): running uses its spinner's color (Claude orange), the rest come from `@orchestra_wait_color`, `@orchestra_background_color`, `@orchestra_compacting_color`, `@orchestra_error_color` and `@orchestra_done_color` (defaults in orchestra.tmux and `set_state_colors`), passed to `render_frame` as header fields 3 and 6-9. Idle windows with an unread finish show a `done`-colored `✓` (Nerd Fonts only).
+- Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`, background: `◴◷◶◵`, compacting: `◜◝◞◟`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Background sessions: `claude agents --json` starts a node process, so it never runs on the tick. `orchestra-render` starts `orchestra-bg-refresh` as a background job every `@orchestra_bg_interval` seconds (one at a time); it writes `@orchestra_bg_agents` only when the list changed and then sends SIGUSR1. The tick reads the option as a last `|bg|REC|...` line of the same tmux call. `render_frame` draws a one-line `── background ──` separator and one 3-line `bg_block` per session after the windows (after the one-line placeholder when there are none); `select_row` uses the same geometry, and `select_go` on a `bg:<id>` pick calls `select_bg_open`, which selects the window tagged `@orchestra_bg_id=<id>` or opens a new one running `claude attach <id>`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
@@ -124,6 +125,13 @@ make shellcheck    # shellcheck only
 - `tests/test_cli.sh` spins up a detached tmux server on a private socket (`-L <socket>`), exercises every CLI subcommand, and asserts option values are written correctly. Always clean up the server with `tmux -L <socket> kill-server` at the end.
 - `tests/test_render.sh` sources [lib/render.sh](lib/render.sh), feeds fixture data, and diffs stdout against [tests/fixtures/](tests/fixtures/) `.expected` files.
 - **When adding a feature, add a corresponding test.** For rendering changes, add or update `.expected` fixture files.
+
+## Pull requests
+
+PRs go to the fork, `asaf-erlich/tmux-orchestra`, against `main`. Every PR that changes behavior must also update, in the same PR:
+
+- [CHANGELOG.md](CHANGELOG.md): an entry under `## Unreleased` (`Added` / `Changed` / `Fixed`).
+- [README.md](README.md): the "What this fork adds" bullet list, plus any section whose instructions or options changed.
 - All tests must pass and shellcheck must be clean before a change is complete.
 
 ## Key conventions

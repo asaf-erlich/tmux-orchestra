@@ -10,7 +10,10 @@ which reads Claude Code's hook JSON on stdin and maps it onto orchestra state:
 | `UserPromptSubmit` | stores the prompt (`@ab_last_prompt`), marks running |
 | `PreToolUse` | marks running with the tool and its description or main argument |
 | `Notification` | a permission prompt marks waiting as `allow? <pending tool>`; other prompts mark waiting with Claude's message; the idle reminder Claude sends a minute after a turn ends changes nothing, so finished sessions do not look blocked |
-| `Stop` | records `@ab_finished_at`, clears state, marks unread unless an attached client is showing the window |
+| `Stop` | records `@ab_finished_at`, clears state, marks unread unless an attached client is showing the window; while background tasks (agents, shells, monitors) are still running it marks `background` as `N background: <first task>` instead, since Claude resumes when they finish |
+| `StopFailure` | the turn ended on an API error (rate limit, overload, ...): marks `error` as `error: <type>` and notifies |
+| `PreCompact` | marks `compacting` |
+| `PostCompact` | back to running after automatic compaction; clears state after `/compact` |
 | `SessionStart` | `/clear` and fresh starts drop the prompt and set `@ab_session_source` (the sidebar shows `∅ cleared` / `∅ empty session`); resume restores the last prompt from the transcript; compaction changes nothing |
 | `SessionEnd` | clears state |
 

@@ -12,7 +12,12 @@ set_default() {
     [ -n "$(tmux show-option -gqv "$1")" ] || tmux set-option -gq "$1" "$2"
 }
 set_default @orchestra_nerd_fonts off
-set_default @orchestra_wait_color '#d29922'
+# Agent state colors (running uses its spinner's color, Claude orange).
+set_default @orchestra_wait_color '#f85149'
+set_default @orchestra_background_color '#58a6ff'
+set_default @orchestra_compacting_color '#bc8cff'
+set_default @orchestra_error_color '#e3b341'
+set_default @orchestra_done_color '#3fb950'
 set_default @orchestra_bg_interval 10
 set_default @orchestra_key B
 set_default @orchestra_width 32

@@ -62,6 +62,32 @@ function spinner_color(sp) {
 	return ""
 }
 
+# Color of an agent state: running takes its spinner color; the others come
+# from the globals bg_color, compact_color, error_color (header fields 6-8,
+# defaults in set_state_colors) and the wait_color argument.
+function state_color(state, spinner, wait_color) {
+	if (state == "running") return spinner_color(spinner)
+	if (state == "waiting") return wait_color
+	if (state == "background") return bg_color
+	if (state == "compacting") return compact_color
+	if (state == "error") return error_color
+	return ""
+}
+
+# Fill the state colors left empty with the defaults (orchestra.tmux sets the
+# same values on the @orchestra_*_color options).
+function set_state_colors() {
+	if (bg_color == "") bg_color = "#58a6ff"
+	if (compact_color == "") compact_color = "#bc8cff"
+	if (error_color == "") error_color = "#e3b341"
+	if (done_color == "") done_color = "#3fb950"
+}
+
+# States that keep the agent busy or need you: everything but idle.
+function live_state(state) {
+	return state == "running" || state == "waiting" || state == "background" || state == "compacting" || state == "error"
+}
+
 function repeat(ch, count,    s, i) {
 	s = ""
 	for (i = 0; i < count; i++) s = s ch
@@ -99,6 +125,15 @@ function state_glyph(state, frame, nerd, spinner) {
 		if (nerd == "on") return pick("◐,◓,◑,◒", 4, frame)
 		return "?"
 	}
+	if (state == "background") {
+		if (nerd == "on") return pick("◴,◷,◶,◵", 4, frame)
+		return "&"
+	}
+	if (state == "compacting") {
+		if (nerd == "on") return pick("◜,◝,◞,◟", 4, frame)
+		return "="
+	}
+	if (state == "error") return (nerd == "on") ? "✗" : "X"
 	if (state == "done") return (nerd == "on") ? "✓" : "OK"
 	return ""
 }
@@ -157,7 +192,7 @@ function empty_text(source) {
 }
 
 function activity_text(state, action, cwd, last_cmd, prompt, source) {
-	if (state == "running" || state == "waiting") return action
+	if (live_state(state)) return action
 	if (prompt != "") return "❯ " prompt
 	if (source != "") return empty_text(source)
 	# Sharing the row with the command, the directory keeps its first 24
@@ -182,14 +217,14 @@ function with_style(style, c, text,    s) {
 # f[] holds the pipe-separated window fields of one input line; f[23] is
 # @ab_session_source and f[24] the last prompt with any "|" it contained
 # rejoined.
-function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color) {
+function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you) {
 	active = f[4]; state = f[5]
 
 	# How long ago the agent last finished (@ab_finished_at, falling back to
 	# the last output in the window), right-aligned in the top border. Hidden
-	# while running: the spinner says more.
+	# while running or compacting: the spinner says more.
 	age = ""
-	if (state != "running") {
+	if (state != "running" && state != "compacting") {
 		since = (f[21] != "") ? f[21] : f[22]
 		age = age_text(since)
 	}
@@ -199,11 +234,17 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	pad = width - length(title) - 4 - tail
 	if (pad < 0) pad = 0
 
-	idle = (state != "running" && state != "waiting")
+	idle = !live_state(state)
 	empty = (idle && f[24] == "" && f[23] != "")
 	activity = activity_text(state, f[6], f[8], f[9], f[24], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
+	# Finished while you were elsewhere (unread): a done check mark. Without
+	# Nerd Fonts the unread "!" in the border already says it.
+	if (idle && !empty && f[12] == "1" && nerd == "on") {
+		glyph = state_glyph("done", frame, nerd, "")
+		gcolor = done_color
+	}
 	if (glyph != "" && activity != "") activity = trim(width - 3, activity)
 	else if (glyph == "") activity = trim(width - 2, activity)
 
@@ -237,13 +278,17 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	# heavy-bordered active window and survives NO_COLOR.
 	if (selected) { tl = "▌"; v = "▌" }
 
+	# Each state has its own color (state_color). Waiting on you and errors
+	# also color the title; every state but running colors its rows (running
+	# colors only the spinner); an empty session reads dim grey.
+	scolor = state_color(state, f[17], wait_color)
+	needs_you = (state == "waiting" || state == "error")
 	title_style = ""
-	if (active == "1" && state == "waiting") title_style = "bold_color"
+	if (active == "1" && needs_you) title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
-	else if (state == "waiting") title_style = "color"
-	# Waiting rows take the wait color; an empty session reads dim grey.
-	row_style = (state == "waiting" || empty) ? "color" : ""
-	row_color = empty ? "#808080" : wait_color
+	else if (needs_you) title_style = "color"
+	row_style = ((live_state(state) && state != "running") || empty) ? "color" : ""
+	row_color = empty ? "#808080" : scolor
 
 	# Unread: a red dot replaces the second-to-last character of the top
 	# border, unless the title fills the row (the meta row still shows the
@@ -253,7 +298,7 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 
 	out = bs tl h " " be
 	if (selected) out = out INVERSE
-	out = out with_style(title_style, wait_color, title)
+	out = out with_style(title_style, scolor, title)
 	if (selected) out = out RESET
 	out = out bs " " repeat(h, before_dot) be
 	if (show_dot) out = out color_start("red") ((nerd == "on") ? "●" : "!") RESET bs h be
@@ -317,8 +362,9 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 
 # Main program. mode=rows: every input line is a window; width, nerd,
 # wait_color, sel and now come from -v. mode=frame: the first line is
-# "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION|NOW" (NOW, epoch seconds, is empty
-# live and fixed in tests), then one line per pane of the server
+# "WIDTH|NERD|WAIT_COLOR|VIEW_SESSION|NOW|BG|COMPACT|ERROR|DONE" (NOW, epoch
+# seconds, is empty live and fixed in tests; the last four are the state
+# colors, empty for the defaults), then one line per pane of the server
 # (list-panes -a); only windows with a Claude pane (field 20) are shown, once
 # each, in input order, titled "session:window", and the selection is
 # derived from fields 18-19. window_active (field 4) is per session, so only
@@ -327,8 +373,13 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 # field 4 as is.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
-BEGIN { FS = "|" }
-mode == "frame" && NR == 1 { width = $1; nerd = $2; wait_color = $3; view = $4; now = $5; next }
+BEGIN { FS = "|"; set_state_colors() }
+mode == "frame" && NR == 1 {
+	width = $1; nerd = $2; wait_color = $3; view = $4; now = $5
+	bg_color = $6; compact_color = $7; error_color = $8; done_color = $9
+	set_state_colors()
+	next
+}
 # "|bg|REC|REC..." (session names are never empty): @orchestra_bg_agents,
 # one record per background session, drawn after the windows.
 mode == "frame" && $1 == "" && $2 == "bg" {

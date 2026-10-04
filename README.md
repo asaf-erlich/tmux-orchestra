@@ -23,6 +23,9 @@ with upstream, it:
 - adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
 - shows each window's **finish age**, **last prompt** and an
   **empty-session** marker
+- gives **each agent state its own color**: working (orange), blocked on
+  you (red), waiting on background agents or shells (blue), compacting
+  (purple), stopped on an API error (yellow), finished unread (green)
 - redraws about **9x faster** (one tmux call and one awk pass per frame)
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, and tmux.conf options being overwritten
@@ -93,6 +96,16 @@ run '~/.tmux/plugins/tpm/tpm'
    ```
 
    Or add `set -g @orchestra_nerd_fonts on` to `~/.tmux.conf` to make it stick.
+6. *(Optional)* Change the agent state colors (`#rrggbb` or a basic color
+   name). Running windows use their spinner's color (Claude orange).
+
+   ```tmux
+   set -g @orchestra_wait_color '#f85149'        # blocked on you
+   set -g @orchestra_background_color '#58a6ff'  # waiting on background work
+   set -g @orchestra_compacting_color '#bc8cff'  # compacting context
+   set -g @orchestra_error_color '#e3b341'       # stopped on an API error
+   set -g @orchestra_done_color '#3fb950'        # finished, not yet seen
+   ```
 
 ## Prompt hooks
 
