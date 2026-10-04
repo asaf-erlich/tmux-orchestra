@@ -20,6 +20,8 @@ compare_fixture "$REPO_DIR/tests/fixtures/render-idle.input" "$REPO_DIR/tests/fi
 compare_fixture "$REPO_DIR/tests/fixtures/render-running.input" "$REPO_DIR/tests/fixtures/render-running.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-waiting.input" "$REPO_DIR/tests/fixtures/render-waiting.expected"
 compare_fixture "$REPO_DIR/tests/fixtures/render-unread.input" "$REPO_DIR/tests/fixtures/render-unread.expected"
+# Background work, compaction and an API error each get their own glyph.
+compare_fixture "$REPO_DIR/tests/fixtures/render-states.input" "$REPO_DIR/tests/fixtures/render-states.expected"
 # Keyboard selection on the second (inactive) window: bar on its left edge,
 # active window keeps its heavy border. Trailing input fields are ignored.
 compare_fixture "$REPO_DIR/tests/fixtures/render-selected.input" "$REPO_DIR/tests/fixtures/render-selected.expected" '@2'
@@ -194,6 +196,20 @@ check_cwd_label '/tmp/project' 'project'
 check_cwd_label '/tmp/abcdefghijklmnopq' 'abcdefghijklmnopq'
 check_cwd_label '/' '/'
 
+check_glyph() {
+    actual=$(render_state_glyph "$1" "$2" "$3")
+    [ "$actual" = "$4" ] || {
+        printf 'glyph %s frame %d nerd %s: expected "%s" got "%s"\n' "$1" "$2" "$3" "$4" "$actual" >&2
+        exit 1
+    }
+}
+check_glyph background 1 on '◷'
+check_glyph background 1 off '&'
+check_glyph compacting 0 on '◜'
+check_glyph compacting 0 off '='
+check_glyph error 0 on '✗'
+check_glyph error 0 off 'X'
+
 check_spinner() {
     name=$1; frame=$2; expected=$3
     actual=$(render_state_glyph running "$frame" off "$name")
@@ -213,3 +229,26 @@ check_spinner opencode 4 '⢾⡱'
 check_spinner opencode 5 '⠰⠆'
 check_spinner opencode 8 '⢎⡱'
 
+
+# State colors (forced on: render_rows only colors a terminal). Background
+# rows take the background color; an unread finish colors its rows and, with
+# Nerd Fonts, a check mark in the done color.
+render_colored() {
+    awk -v mode=rows -v width=40 -v frame=0 -v nerd="$1" -v wait_color='#f85149' \
+        -v color=1 "$_RENDER_AWK_LIB$_RENDER_AWK_MAIN"
+}
+check_colored() {
+    case "$2" in
+        *"$3"*) ;;
+        *) printf 'color: %s missing "%s"\n%s\n' "$1" "$3" "$2" >&2; exit 1 ;;
+    esac
+}
+green=$(printf '\033[38;2;63;185;80m')
+blue=$(printf '\033[38;2;88;166;255m')
+out=$(printf '%s\n' 'dev|@1|api|0|background|1 background: agent|||||||||||claude' | render_colored off)
+check_colored 'background row' "$out" "${blue}&"
+check_colored 'background activity row' "$out" "${blue}1 background: agent"
+out=$(printf '%s\n' 'dev|@1|api|0||||/src/api|ls|||1|Claude Code: finished||||' | render_colored on)
+check_colored 'unread check mark' "$out" "${green}✓"
+check_colored 'unread activity row' "$out" "${green}api  \$ ls"
+check_colored 'unread meta row' "$out" "${green}Claude Code: finished"

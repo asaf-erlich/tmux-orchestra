@@ -14,7 +14,7 @@ orchestra list-status [--window ID]
 orchestra set-progress <float> [--label TEXT] [--window ID]
 orchestra clear-progress [--window ID]
 orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID]
-orchestra set-state <running|waiting|done> [--action TEXT] [--window ID]
+orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID]
 orchestra clear-state [--window ID]
 ```
 

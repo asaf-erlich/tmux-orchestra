@@ -13,7 +13,7 @@ usage() {
   orchestra set-progress <float> [--label TEXT] [--window ID]
   orchestra clear-progress [--window ID]
   orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID]
-  orchestra set-state <running|waiting|done> [--action TEXT] [--window ID]
+  orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID]
   orchestra clear-state [--window ID]
   orchestra set-prompt <text> [--window ID]"
 }
@@ -227,17 +227,18 @@ cmd_set_state() {
     [ $# -eq 0 ] || usage
 
     case "$state" in
-        running|waiting|done) ;;
-        *) ab_usage 'state must be running, waiting, or done' ;;
+        running|waiting|background|compacting|error|done) ;;
+        *) ab_usage 'state must be running, waiting, background, compacting, error, or done' ;;
     esac
 
     target=$(resolve_window "$win")
     # @ab_finished_at records when the agent last stopped and handed control
-    # back: every "done", and a "waiting" that interrupts a running turn (a
-    # permission prompt). A "waiting" after the turn already ended (Claude's
-    # idle reminder) keeps the earlier time.
+    # back: every "done", "background" (the turn ended with background work
+    # still running) and "error", and a "waiting" that interrupts a running
+    # turn (a permission prompt). A "waiting" after the turn already ended
+    # (Claude's idle reminder) keeps the earlier time.
     stamp=''
-    if [ "$state" = 'done' ]; then
+    if [ "$state" = 'done' ] || [ "$state" = 'background' ] || [ "$state" = 'error' ]; then
         stamp=1
     elif [ "$state" = 'waiting' ] && [ "$(get_opt "$target" '@ab_agent_state')" = 'running' ]; then
         stamp=1

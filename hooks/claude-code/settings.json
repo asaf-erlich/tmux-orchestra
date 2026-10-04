@@ -40,6 +40,36 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook stop-failure"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook pre-compact"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook post-compact"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

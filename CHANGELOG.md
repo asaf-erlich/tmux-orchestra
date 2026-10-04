@@ -43,8 +43,34 @@ All of them are on the `fix-pane-exists` branch.
   window as waiting. `orchestra-claude-hook backfill` fills in state for
   Claude panes that were already running.
 
+- **A color for each agent state.** Working and waiting on you were both
+  orange. Each state now has its own color and glyph: working keeps the
+  Claude-orange spinner; blocked on you (a permission prompt or question)
+  is red; waiting on background work is blue (`◴`, `&` without Nerd
+  Fonts); compacting is purple (`◜`, `=`); a turn that ended on an API
+  error such as a rate limit is yellow (`✗`, `X`); an idle window that
+  finished while you were elsewhere is green, with a `✓` (Nerd Fonts);
+  idle windows you have seen stay plain. Set the colors with
+  `@orchestra_wait_color`, `@orchestra_background_color`,
+  `@orchestra_compacting_color`, `@orchestra_error_color` and
+  `@orchestra_done_color`. `orchestra set-state` accepts `background`,
+  `compacting` and `error`.
+- **Background, compaction and error states from Claude Code.** When a turn
+  ends with background agents, shells or monitors still running (the Stop
+  hook's `background_tasks`), the window shows `background` with the
+  first task instead of finishing. New `stop-failure`, `pre-compact` and
+  `post-compact` events in `orchestra-claude-hook` (hooks `StopFailure`,
+  `PreCompact` and `PostCompact` in the template) show API errors and
+  compaction.
+
 ### Changed
 
+- **Waiting color is red.** The default `@orchestra_wait_color` changed
+  from amber `#d29922` to red `#f85149`, so it no longer looks like the
+  running spinner. A running tmux server keeps the old value until you run
+  `tmux set -gu @orchestra_wait_color` and reload the plugin. An open
+  sidebar keeps drawing with the code it started with, so close and reopen
+  it (`prefix + B` twice) to see the new states.
 - **Much faster redraws.** Each redraw is one tmux call and one awk pass
   instead of a process per field and per line. On a macOS host with slow
   process creation, a 9-window redraw went from about 1.5 s to about

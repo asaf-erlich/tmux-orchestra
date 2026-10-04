@@ -1,0 +1,3 @@
+dev|@1|api|0|background|2 background: Run the test suite|||||||||||claude
+dev|@2|web|0|compacting|compacting (auto)|||||||||||claude
+dev|@3|cli|1|error|error: rate_limit|||||||stopped: rate_limit||||claude

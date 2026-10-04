@@ -170,6 +170,23 @@ orchestra set-state waiting --window "$window_id"
 if [ "$(tmux show-options -v -w -t "$window_id" @ab_finished_at)" = '5' ]; then
     assert_eq 'a new time' '5' 'waiting during a turn records the finish time'
 fi
+# Background work, compaction and API errors are states of their own; the
+# turn ending with background work running or on an error records the
+# finish time, compaction does not.
+for state in background compacting error; do
+    tmux set-option -wq -t "$window_id" @ab_finished_at 5
+    orchestra set-state "$state" --window "$window_id"
+    assert_eq "$state" "$(tmux show-options -v -w -t "$window_id" @ab_agent_state)" "$state state is written"
+    stamp=$(tmux show-options -v -w -t "$window_id" @ab_finished_at)
+    if [ "$state" = compacting ]; then
+        assert_eq '5' "$stamp" 'compacting keeps the finish time'
+    elif [ "$stamp" = '5' ]; then
+        assert_eq 'a new time' '5' "$state records the finish time"
+    fi
+done
+if orchestra set-state sleeping --window "$window_id" 2>/dev/null; then
+    assert_eq 'usage error' 'accepted' 'set-state rejects an unknown state'
+fi
 orchestra set-state 'done' --window "$window_id"
 orchestra set-prompt 'fix the
 flaky | test' --window "$window_id"
@@ -201,6 +218,24 @@ hook stop '{}'
 assert_eq '' "$(opt @ab_agent_state)" 'stop clears the state'
 assert_eq '1' "$(opt @ab_unread)" 'stop marks a window nobody is looking at unread'
 hook notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+assert_eq '' "$(opt @ab_agent_state)" 'the idle reminder does not mark waiting'
+hook stop '{"background_tasks":[{"id":"a1","type":"local_agent","status":"running","description":"Review  the diff"},{"id":"b2","type":"local_bash","status":"completed","description":"old"}]}'
+assert_eq 'background' "$(opt @ab_agent_state)" 'stop with a running background task marks background'
+assert_eq '1 background: Review the diff' "$(opt @ab_current_action)" 'background names the running task'
+hook stop '{"background_tasks":[{"id":"b2","type":"local_bash","status":"completed","description":"old"}]}'
+assert_eq '' "$(opt @ab_agent_state)" 'stop with only finished background tasks clears the state'
+hook pre-compact '{"trigger":"auto"}'
+assert_eq 'compacting' "$(opt @ab_agent_state)" 'pre-compact marks compacting'
+assert_eq 'compacting (auto)' "$(opt @ab_current_action)" 'compacting names the trigger'
+hook post-compact '{"trigger":"auto"}'
+assert_eq 'running' "$(opt @ab_agent_state)" 'automatic compaction resumes running'
+hook pre-compact '{"trigger":"manual"}'
+hook post-compact '{"trigger":"manual"}'
+assert_eq '' "$(opt @ab_agent_state)" '/compact ends idle'
+hook stop-failure '{"error":"rate_limit"}'
+assert_eq 'error' "$(opt @ab_agent_state)" 'stop-failure marks error'
+assert_eq 'error: rate_limit' "$(opt @ab_current_action)" 'error names the failure'
+hook stop '{}'
 assert_eq '' "$(opt @ab_agent_state)" 'the idle reminder does not mark waiting'
 printf '%s\n' '{"type":"user","message":{"content":"first ask"}}' \
     '{"type":"user","message":{"content":[{"type":"text","text":"second ask"}]}}' \

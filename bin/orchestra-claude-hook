@@ -8,7 +8,14 @@
 #   notification   Notification: permission prompts and questions mark the
 #                  window waiting; the idle reminder Claude sends a minute
 #                  after a turn ends does not (the turn is over, not blocked)
-#   stop           Stop: done, finish time, unread unless you are looking
+#   stop           Stop: done, finish time, unread unless you are looking;
+#                  "background" instead while background tasks (agents,
+#                  shells, monitors) are still running
+#   stop-failure   StopFailure: the turn ended on an API error (rate limit,
+#                  overload, ...): error
+#   pre-compact    PreCompact: compacting
+#   post-compact   PostCompact: back to running after an automatic compaction,
+#                  idle after /compact
 #   session-start  SessionStart: /clear and fresh starts leave an empty
 #                  session marker; resume restores the last prompt
 #   session-end    SessionEnd: clear state
@@ -87,13 +94,51 @@ event_notification() {
     orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" --window "$target"
 }
 
+# Stop lists the session's background tasks; finished ones may linger in
+# the list. Prints "N background: <first description>" or nothing.
+background_summary() {
+    # shellcheck disable=SC2016 # jq program, not shell.
+    field '[.background_tasks[]? | select((.status // "running") as $s
+        | ["completed", "failed", "killed", "cancelled", "canceled", "stopped", "done", "error"]
+        | index($s) | not)]
+        | if length == 0 then empty
+          else "\(length) background: \(.[0].description // .[0].command // .[0].type // "task")"
+          end | gsub("\\s+"; " ")'
+}
+
 event_stop() {
+    # Background work still running: Claude picks the turn up again when it
+    # finishes, so this is not "finished" yet.
+    pending=$(background_summary)
+    if [ -n "$pending" ]; then
+        orchestra set-state background --spinner claude --action "$pending" --window "$target"
+        return 0
+    fi
     orchestra set-state 'done' --window "$target"
     orchestra clear-state --window "$target"
     # Unread means "finished while you were elsewhere": skip it for the
     # window an attached client is showing.
     looking=$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)
     [ "$looking" = 1 ] || orchestra notify --quiet --title 'Claude Code' --body 'finished' --window "$target"
+}
+
+event_stop_failure() {
+    error=$(field .error)
+    orchestra set-state error --spinner claude --action "error: ${error:-unknown}" --window "$target"
+    orchestra notify --quiet --title 'Claude Code' --body "stopped: ${error:-error}" --window "$target"
+}
+
+event_pre_compact() {
+    trigger=$(field .trigger)
+    orchestra set-state compacting --spinner claude --action "compacting${trigger:+ ($trigger)}" --window "$target"
+}
+
+event_post_compact() {
+    if [ "$(field .trigger)" = 'manual' ]; then
+        orchestra clear-state --window "$target"
+    else
+        orchestra set-state running --spinner claude --action 'compacted' --window "$target"
+    fi
 }
 
 event_session_start() {
@@ -188,6 +233,9 @@ case "$event" in
     pre-tool) event_pre_tool ;;
     notification) event_notification ;;
     stop) event_stop ;;
+    stop-failure) event_stop_failure ;;
+    pre-compact) event_pre_compact ;;
+    post-compact) event_post_compact ;;
     session-start) event_session_start ;;
     session-end) orchestra clear-state --window "$target" ;;
 esac
