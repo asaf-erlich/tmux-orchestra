@@ -27,7 +27,7 @@ case "$width" in
     ''|*[!0-9]*) width=32 ;;
 esac
 
-pane_info=$(tmux split-window -bhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
+pane_info=$(tmux split-window -bfhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
 new_pane=${pane_info%%|*}
 new_pid=${pane_info#*|}
 

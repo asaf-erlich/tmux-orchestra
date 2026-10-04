@@ -91,6 +91,17 @@ wait_eq() {
 where_pane() {
     tmux display-message -p -t "$1" '#{session_name}|#{window_id}'
 }
+# "left|height|window_height" of a pane: the sidebar must sit at the left edge
+# and span the full window height.
+sidebar_geometry() {
+    tmux display-message -p -t "$1" '#{pane_left}|#{pane_height}|#{window_height}'
+}
+sidebar_at_left_edge() {
+    geom=$(sidebar_geometry "$1")
+    left=${geom%%|*}
+    rest=${geom#*|}
+    [ "$left" = 0 ] && [ "${rest%%|*}" = "${rest#*|}" ] && printf ok
+}
 where_client() {
     tmux list-clients -F '#{client_session}|#{window_id}'
 }
@@ -557,12 +568,22 @@ orchestra-select enter orchestra-tests
 wait_eq "orchestra-tests|$window_id" 'the sidebar follows the client to the picked pane' where_pane "$sidebar"
 sleep 0.5
 assert_eq "$window_id|$w1_second" "$(where_active)" 'enter from another window keeps the picked second pane'
+# The picked pane is in the right-hand column of main-vertical; the sidebar
+# still sits at the window's left edge, full height, not beside that pane.
+assert_eq ok "$(sidebar_at_left_edge "$sidebar")" 'the sidebar follows to the left edge, full height, when a right-hand pane is picked'
+assert_eq "32" "$(tmux display-message -p -t "$sidebar" '#{pane_width}')" 'the sidebar keeps its width at the left edge'
 
 # A sidebar pane killed by hand: follow forgets it instead of failing.
 tmux kill-pane -t "$sidebar"
 orchestra-follow "$window_id" "$first_pane"
 assert_eq '' "$(tmux show-options -gqv @orchestra_sidebar_pane_id)" 'follow clears a stale sidebar pane id'
 assert_eq '' "$(tmux show-options -gqv @orchestra_sidebar_pid)" 'follow clears a stale sidebar pid'
+
+# Toggling open from a right-hand pane still opens at the left edge, full height.
+TMUX_PANE=$w1_second orchestra-toggle
+sidebar=$(tmux show-options -gqv @orchestra_sidebar_pane_id)
+assert_eq ok "$(sidebar_at_left_edge "$sidebar")" 'toggle from a right-hand pane opens the sidebar at the left edge, full height'
+TMUX_PANE=$w1_second orchestra-toggle
 
 # Migration: per-session sidebar options from earlier versions are dropped
 # when the plugin loads.

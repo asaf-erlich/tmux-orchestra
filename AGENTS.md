@@ -150,7 +150,7 @@ Do not introduce temp files, FIFOs, sockets, or environment variables as a persi
 After writing state that should appear immediately in the sidebar (e.g., `notify`), send `kill -USR1 <renderer_pid>` where pid comes from `@orchestra_sidebar_pid`. The renderer may not be running (sidebar closed) — handle that case silently.
 
 ### Sidebar pane lifecycle
-The sidebar is a real tmux pane running `orchestra-render`. There is one per server. `orchestra-follow` moves the pane across windows and sessions via `move-pane` on every `pane-focus-in` and `client-session-changed`, and clears the global options if the pane is gone. The renderer PID stays alive across moves; always signal via `@orchestra_sidebar_pid`, not by searching process trees.
+The sidebar is a real tmux pane running `orchestra-render`. There is one per server. `orchestra-follow` moves the pane across windows and sessions via `move-pane -f` (left edge, full window height, whichever pane is focused; `orchestra-toggle` opens it with `split-window -f` likewise) on every `pane-focus-in` and `client-session-changed`, and clears the global options if the pane is gone. The renderer PID stays alive across moves; always signal via `@orchestra_sidebar_pid`, not by searching process trees.
 
 ## Agent harness integration pattern
 

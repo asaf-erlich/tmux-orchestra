@@ -7,6 +7,15 @@ All of them are on the `fix-pane-exists` branch.
 
 ## Unreleased
 
+### Changed
+
+- **The sidebar always sits at the left edge of its window, full height.**
+  It used to open and follow to the left of the focused pane, so with two
+  panes side by side it ended up between them whenever the right one was
+  focused. `orchestra-follow` and `orchestra-toggle` now place it with
+  `-f`, so it spans the window's full height at the far left whichever
+  pane is focused.
+
 ### Added
 
 - **A row for each Claude pane.** Two Claude Code sessions split into one

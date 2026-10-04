@@ -19,6 +19,8 @@ with upstream, it:
 - lists **background Claude Code sessions** (`claude --bg`, FleetView) under a
   separator, and opens one in a new window with `claude attach` on Enter or a
   click
+- always puts the sidebar at the **left edge of the window, full height**,
+  whichever pane is focused (not between side-by-side panes)
 - keeps **one sidebar per tmux server**, listing Claude windows from every
   session and switching your client on Enter or a click
 - gives **each Claude pane its own row**, so two Claude sessions split into
