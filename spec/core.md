@@ -69,7 +69,7 @@ All options are tmux **window** options unless noted. Keys are literal — the r
 | `@orchestra_sidebar_width` (global) | integer | `orchestra-toggle`, `after-resize-pane` hook | — |
 | `@orchestra_sidebar_pane_id` (global) | pane id | `orchestra-toggle` | toggle close; `orchestra-follow` when the pane is gone |
 | `@orchestra_sidebar_pid` (global) | pid | `orchestra-toggle` | as above |
-| `@orchestra_selected_window` (global) | window id | `lib/select.sh` | Enter, click, `pane-focus-in` |
+| `@orchestra_selected_window` (global) | pane id, or `bg:<id>` | `lib/select.sh` | Enter, click, `pane-focus-in` |
 
 There is one sidebar per tmux server, so its state is global. Per-session `@ab_width` / `@ab_sidebar_pane_id` / `@ab_sidebar_pid` / `@ab_selected_window` from earlier versions are unset (and their sidebar panes closed) when `orchestra.tmux` loads.
 
@@ -83,7 +83,9 @@ There is one sidebar per tmux server, so its state is global. Per-session `@ab_w
 
 `$TMUX_PANE` is checked before `$ORCHESTRA_WINDOW_ID` because it is the most specific signal: it is set by tmux itself in every child process of a pane, so it always points at the shell that issued the command. `$ORCHESTRA_WINDOW_ID` is best-effort (it is only refreshed by `pane-focus-in` hooks and will be stale inside long-lived shells) and so it is used as a fallback only when `$TMUX_PANE` is unavailable.
 
-Implement this as `resolve_window()` in `lib/common.sh` once; every CLI entrypoint calls it.
+Implement this as `resolve_window()` in `lib/common.sh` once; every CLI entrypoint calls it (through `resolve_target()`, which returns the `--pane` id instead when one is given).
+
+**Pane scope.** `set_opt` / `clear_opt` / `get_opt` write and read pane options for a `%N` target and window options otherwise. `get_opt` returns the target's own value only; `#{@ab_*}` in formats inherits pane → window → session → global. The Claude Code hook writes every agent option to its pane, and on SessionStart and UserPromptSubmit clears the agent options (`AB_AGENT_OPTS`) on its window in one tmux call, so state an earlier window-scoped version left there is not inherited by every pane.
 
 **Truncation.** `set_opt()` in `common.sh` truncates values to the per-field max (see table) before writing. Truncation adds a trailing `…`.
 

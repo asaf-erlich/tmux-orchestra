@@ -8,15 +8,17 @@
 Exact argument shapes. Deviating from these breaks the Claude Code / Codex / OpenCode templates.
 
 ```
-orchestra set-status <key> <value> [--icon GLYPH] [--color COLOR] [--window ID]
-orchestra clear-status <key> [--window ID]
-orchestra list-status [--window ID]
-orchestra set-progress <float> [--label TEXT] [--window ID]
-orchestra clear-progress [--window ID]
-orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID]
-orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID]
-orchestra clear-state [--window ID]
+orchestra set-status <key> <value> [--icon GLYPH] [--color COLOR] [--window ID | --pane ID]
+orchestra clear-status <key> [--window ID | --pane ID]
+orchestra list-status [--window ID | --pane ID]
+orchestra set-progress <float> [--label TEXT] [--window ID | --pane ID]
+orchestra clear-progress [--window ID | --pane ID]
+orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID | --pane ID]
+orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID | --pane ID]
+orchestra clear-state [--window ID | --pane ID]
 ```
+
+`--pane %N` writes pane options (`set-option -p`) instead of window options, so several agents in one window keep separate state; the Claude Code hook passes its `$TMUX_PANE`. tmux formats such as `#{@ab_agent_state}` read a pane's own option and fall back to its window's, so window-scoped writers (OpenCode, the prompt hooks) keep working. A `--pane` value that is not a pane id (`%N`) is a usage error.
 
 `set-state` is sugar for `set-option @ab_agent_state` + optional `@ab_current_action`. It exists so harness templates are one-liners. When `--action` is omitted, the previous action is cleared (the sidebar shows a bare state glyph).
 

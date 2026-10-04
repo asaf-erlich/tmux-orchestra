@@ -21,6 +21,8 @@ with upstream, it:
   click
 - keeps **one sidebar per tmux server**, listing Claude windows from every
   session and switching your client on Enter or a click
+- gives **each Claude pane its own row**, so two Claude sessions split into
+  one window no longer share (and overwrite) one state
 - lists **only windows running Claude Code**, so stale state never shows
 - adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
 - shows each window's **finish age**, **last prompt** and an
@@ -32,7 +34,9 @@ with upstream, it:
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, tmux.conf options being overwritten, and a
   window that stayed red (or kept spinning) after you rejected a permission
-  prompt or pressed Esc
+  prompt or pressed Esc, an API error marking the window you were
+  looking at unread, and a last prompt replaced by a background task's
+  `<task-notification>` markup
 
 See [CHANGELOG.md](CHANGELOG.md) for details, and [DEMO.md](DEMO.md) for a
 step-by-step demo of every feature in real Claude Code sessions.
@@ -184,6 +188,11 @@ orchestra notify --title 'Build' --body 'done'
 orchestra clear-state
 orchestra set-prompt 'fix the flaky test'
 ```
+
+Every subcommand writes to the current window, or to `--window @N`. With
+`--pane %N` it writes pane options instead, so several agents in one window
+keep separate state (the Claude Code hook does this with `$TMUX_PANE`). A
+pane without a value of its own shows its window's.
 
 ## Testing
 

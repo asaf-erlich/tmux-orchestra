@@ -37,13 +37,16 @@ redraw() {
     # shows), then one line per pane of every session. Fields 18-20 carry
     # @orchestra_selected_window, whether the sidebar has focus (it is the
     # active pane of the active window) and whether the pane runs Claude Code
-    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); fields 21-24 carry the finish
-    # time, the window's last output time, the session source and the last
-    # prompt (last, as it may contain "|"). The last line, "|bg|...", is
-    # @orchestra_bg_agents. render_frame shows one block per window with a
-    # Claude pane, then the background sessions.
+    # (ORCHESTRA_CLAUDE_PANE, lib/select.sh); fields 21-27 carry the finish
+    # time, the window's last output time, the session source, the pane id,
+    # index and active flag (1 active, 2 previously active) and the last
+    # prompt (last, as it may contain "|"). #{@ab_*} reads the pane's own
+    # option, else its window's: the Claude Code hook writes pane options,
+    # other writers window options. The last line, "|bg|...", is
+    # @orchestra_bg_agents. render_frame shows one block per Claude pane,
+    # then the background sessions.
     if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}||#{@orchestra_background_color}|#{@orchestra_compacting_color}|#{@orchestra_error_color}|#{@orchestra_done_color}' \; \
-        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{@ab_last_prompt}" \; \
+        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{pane_id}|#{pane_index}|#{?pane_active,1,#{?pane_last,2,0}}|#{@ab_last_prompt}" \; \
         display-message -p '|bg|#{@orchestra_bg_agents}' 2>/dev/null); then
         :
     else
