@@ -56,7 +56,7 @@ Run these in order in one Claude window. Keep the sidebar visible.
 | Background agent | **Prompt:** `Start a background agent that runs "sleep 45" and reports back, then end your turn without waiting.` | blue again, naming the agent's task |
 | Finished, not yet seen | **Prompt:** `Run "sleep 20" with Bash, then say done.` Immediately switch to another window (`prefix + n`) | when it finishes: green check `✓` and green rows, the unread dot (`●` / `!`) in the top border. Switching back to the window clears the dot and the green |
 | Compacting | Type `/compact` | purple `◜` / `=` with `compacting (manual)`, then idle. Automatic compaction mid-turn shows `compacting (auto)` and goes back to orange |
-| Error | A real API error (rate limit, overload) is hard to trigger on demand, so simulate one: `! printf '{"error":"rate_limit"}' \| orchestra-claude-hook stop-failure` | yellow title and rows, `✗` / `X`, `error: rate_limit`, and the unread dot if you are in another window. The next prompt clears it |
+| Error | A real API error (rate limit, overload) is hard to trigger on demand, so simulate one. Type this at the **Claude prompt** of the window you want to turn yellow (the leading `!` runs it as a shell command inside that Claude session, so the hook targets that window): `! printf '{"error":"rate_limit"}' \| orchestra-claude-hook stop-failure`. Running it in a plain shell window changes that shell window instead, and the sidebar only lists windows running Claude, so nothing visible happens | yellow title and rows, `✗` / `X`, `error: rate_limit`, and the unread dot if you are in another window. The next prompt clears it |
 | Cleared | Type `/clear` | dim grey `∅ cleared` |
 
 ### Changing the colors
