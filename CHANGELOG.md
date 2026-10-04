@@ -89,6 +89,12 @@ All of them are on the `fix-pane-exists` branch.
   (hooks `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` in the
   template) also turn an approved prompt back to running as soon as the
   tool runs.
+- **Rejected prompt left the window green.** A permission prompt marked the
+  window unread even while you were looking at it, so once it cleared the
+  window showed the green "finished, not yet seen" check. The Notification
+  hook now skips the unread mark for the window an attached client is
+  showing, as Stop already did, and reconcile drops the unread when it
+  clears a window.
 - **Focus loop that could crash the terminal.** `orchestra-follow` resolved
   the "current" window against whichever client tmux picked, which could
   make focus hooks fire each other in a loop. In one case iTerm2 grew to

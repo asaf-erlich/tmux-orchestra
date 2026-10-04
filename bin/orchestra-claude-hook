@@ -100,6 +100,11 @@ event_turn_aborted() {
     orchestra clear-state --window "$target"
 }
 
+# True when an attached client is showing the target window.
+looking() {
+    [ "$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)" = 1 ]
+}
+
 event_notification() {
     kind=$(field .notification_type)
     message=$(field .message)
@@ -116,7 +121,9 @@ event_notification() {
             orchestra set-state waiting --spinner claude --action "${message:-needs input}" --window "$target"
             ;;
     esac
-    orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" --window "$target"
+    # Unread means "needs you while you were elsewhere": skip it for the
+    # window an attached client is showing.
+    looking || orchestra notify --quiet --title 'Claude Code' --body "${message:-needs input}" --window "$target"
 }
 
 # Stop lists the session's background tasks; finished ones may linger in
@@ -143,8 +150,7 @@ event_stop() {
     orchestra clear-state --window "$target"
     # Unread means "finished while you were elsewhere": skip it for the
     # window an attached client is showing.
-    looking=$(tmux display-message -p -t "$target" '#{&&:#{window_active},#{session_attached}}' 2>/dev/null)
-    [ "$looking" = 1 ] || orchestra notify --quiet --title 'Claude Code' --body 'finished' --window "$target"
+    looking || orchestra notify --quiet --title 'Claude Code' --body 'finished' --window "$target"
 }
 
 event_stop_failure() {
@@ -256,7 +262,11 @@ reconcile() {
         idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
         case "$idle_since" in ''|*[!0-9]*) continue ;; esac
         [ $((now_ms - idle_since)) -ge 3000 ] || continue
+        # Rejecting the prompt or pressing Esc means you were at the window:
+        # drop the unread its permission notification left, or the window
+        # would read "finished, not yet seen".
         orchestra clear-state --window "$window"
+        clear_opt "$window" '@ab_unread'
     done
 }
 

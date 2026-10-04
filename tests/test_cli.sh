@@ -283,8 +283,10 @@ claude_status idle "$now_ms"
 reconcile
 assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile waits before trusting a fresh idle'
 claude_status idle $((now_ms - 60000))
+tmux set-option -wq -t "$window_id" @ab_unread 1
 reconcile
 assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
+assert_eq '' "$(opt @ab_unread)" 'reconcile drops the unread the permission prompt left'
 orchestra set-state background --action '1 background: x' --window "$window_id"
 reconcile
 assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'
