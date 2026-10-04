@@ -85,6 +85,28 @@ their spinner's color (Claude orange).
 | Open the selection | `Enter` | switches to the selected window |
 | Width | `tmux set -gu @orchestra_sidebar_width; tmux set -g @orchestra_width 48`, then `prefix + B` twice | the sidebar reopens 48 columns wide. Dragging the sidebar's edge also sticks: the last width is remembered in `@orchestra_sidebar_width`, which wins over `@orchestra_width` |
 
+### Two Claude sessions in one window
+
+Each Claude pane gets its own row, so two Claudes split side by side never
+overwrite each other's state. Call the existing Claude pane **A** and the
+new one **B**.
+
+| Step | Do this | Sidebar shows |
+|---|---|---|
+| Second row | In a Claude window, split it (`prefix + %`) and run `claude --permission-mode default` in the new pane (B) | a second row for the same window. Both titles get the pane number, `session:window.N` (e.g. `1:0.1` and `1:0.2`), and B shows `∅ empty session` with an age that counts up |
+| Independent states | In A, **prompt:** `Run "sleep 60" with Bash using run_in_background, then end your turn right away without waiting for it.` Then in B, **prompt:** `Read README.md and summarize it in three bullets.` | A's row turns blue; B's row turns orange, then idle, while A stays blue |
+| Blocked in one pane | In B, **prompt:** `Use Bash to run: touch /tmp/orchestra-demo3` and answer **No** | only B's row turns red; within about 10 seconds it goes idle again. A's row never changes |
+| Select a pane | Click B's row, or select it with `j`/`k` and press `Enter`. Repeat from another window (`prefix + n` first) | focus jumps to that exact split, not just to its window |
+| Unread per pane | In A, **prompt:** `Run "sleep 20" with Bash, then say done.` and immediately click into B | when A finishes, only A's row shows the green check and the unread dot. Clicking into A clears them |
+| Single-pane windows | Look at any other Claude window | still one row with the plain `session:window` title |
+
+The sidebar moves next to whichever pane has focus, so selecting B puts it
+between the two splits.
+
+The first time after upgrading, a Claude pane that was already running may
+lose its prompt line when the other pane starts, until its own next prompt.
+The old version stored that prompt on the window.
+
 ## 3. Background Claude sessions
 
 Sessions run by the Claude Code daemon have no tmux pane, but the sidebar
@@ -102,16 +124,19 @@ The refresh period is `@orchestra_bg_interval` seconds (default 10).
 ## 4. The orchestra CLI
 
 Run these from a Claude window with `!`, so the sidebar shows the result on
-that window.
+that window. Claude's hooks keep the agent state and last prompt on the
+Claude pane, and a pane's value wins over the window's, so pass
+`--pane "$TMUX_PANE"` to the state, prompt and notify commands. The status pill
+and progress bar are only ever set by hand, so they work per window.
 
 | Step | Do this | Sidebar shows |
 |---|---|---|
 | Status pill | `! orchestra set-status phase build --icon '*'` | `* build` on the bottom row |
 | Progress bar | `! orchestra set-progress 0.42 --label Tests` | `████░░░░░░ 42% Tests` (`####------` without Nerd Fonts) |
 | Clear them | `! orchestra clear-status phase` and `! orchestra clear-progress` | the bottom row goes back to the prompt or directory |
-| Notification | `! orchestra notify --title Build --body done`, then switch away and back | a desktop notification, and the unread dot until you return. `--quiet` skips the desktop notification |
-| Set a state by hand | `! orchestra set-state background --action 'waiting on CI'` | blue background state. `! orchestra clear-state` resets it |
-| Last prompt | `! orchestra set-prompt 'fix the flaky test'` | `❯ fix the flaky test` |
+| Notification | `! orchestra notify --title Build --body done --pane "$TMUX_PANE"`, then switch away and back | a desktop notification, and the unread dot until you return. `--quiet` skips the desktop notification |
+| Set a state by hand | `! orchestra set-state background --action 'waiting on CI' --pane "$TMUX_PANE"` | blue background state. `! orchestra clear-state --pane "$TMUX_PANE"` resets it |
+| Last prompt | `! orchestra set-prompt 'fix the flaky test' --pane "$TMUX_PANE"` | `❯ fix the flaky test` |
 
 If `orchestra` is not found, the pane was opened before the plugin loaded
 and has the old `PATH`; open a new pane, or use the full path to the
