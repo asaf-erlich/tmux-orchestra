@@ -5,6 +5,14 @@
 #
 #   prompt         UserPromptSubmit: store the prompt, mark running
 #   pre-tool       PreToolUse: mark running with a readable tool summary
+#   post-tool      PostToolUse: a tool ran, so a permission prompt for it was
+#                  approved: waiting goes back to running
+#   tool-failure   PostToolUseFailure: an interrupt (Esc, or rejecting a
+#                  permission prompt) ends the turn without a Stop: clear
+#                  state; any other failure is like post-tool
+#   permission-denied
+#                  PermissionDenied: a rejected tool call; clear state (if
+#                  Claude carries on, its next hook marks running again)
 #   notification   Notification: permission prompts and questions mark the
 #                  window waiting; the idle reminder Claude sends a minute
 #                  after a turn ends does not (the turn is over, not blocked)
@@ -73,6 +81,19 @@ event_pre_tool() {
         // .tool_input.prompt // (.tool_input | tostring)) | tostring
         | gsub("\\s+"; " ") | .[0:100])')
     orchestra set-state running --spinner claude --action "${action:-working}" --window "$target"
+}
+
+# Back to running after an approved permission prompt; any other state is
+# left alone (a later PreToolUse or Stop moves it on).
+event_post_tool() {
+    [ "$(get_opt "$target" '@ab_agent_state')" = 'waiting' ] || return 0
+    orchestra set-state running --spinner claude --action "$(field .tool_name): done" --window "$target"
+}
+
+# No Stop hook runs after an interrupt, so without this the window would
+# keep showing the last state (red, after rejecting a permission prompt).
+event_turn_aborted() {
+    orchestra clear-state --window "$target"
 }
 
 event_notification() {
@@ -232,6 +253,10 @@ case "$event" in
     prompt) event_prompt ;;
     pre-tool) event_pre_tool ;;
     notification) event_notification ;;
+    post-tool) event_post_tool ;;
+    tool-failure)
+        if [ "$(field .is_interrupt)" = 'true' ]; then event_turn_aborted; else event_post_tool; fi ;;
+    permission-denied) event_turn_aborted ;;
     stop) event_stop ;;
     stop-failure) event_stop_failure ;;
     pre-compact) event_pre_compact ;;

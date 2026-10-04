@@ -9,6 +9,9 @@ which reads Claude Code's hook JSON on stdin and maps it onto orchestra state:
 |---|---|
 | `UserPromptSubmit` | stores the prompt (`@ab_last_prompt`), marks running |
 | `PreToolUse` | marks running with the tool and its description or main argument |
+| `PostToolUse` | a tool ran after a permission prompt: waiting goes back to running |
+| `PostToolUseFailure` | an interrupt (Esc, or rejecting a permission prompt) clears state, since no `Stop` follows; other failures act like `PostToolUse` |
+| `PermissionDenied` | a rejected tool call clears state; if Claude carries on, its next hook marks running again |
 | `Notification` | a permission prompt marks waiting as `allow? <pending tool>`; other prompts mark waiting with Claude's message; the idle reminder Claude sends a minute after a turn ends changes nothing, so finished sessions do not look blocked |
 | `Stop` | records `@ab_finished_at`, clears state, marks unread unless an attached client is showing the window; while background tasks (agents, shells, monitors) are still running it marks `background` as `N background: <first task>` instead, since Claude resumes when they finish |
 | `StopFailure` | the turn ended on an API error (rate limit, overload, ...): marks `error` as `error: <type>` and notifies |
