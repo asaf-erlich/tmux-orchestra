@@ -7,15 +7,18 @@ ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 
 usage() {
     ab_usage "usage:
-  orchestra set-status <key> <value> [--icon GLYPH] [--color COLOR] [--window ID]
-  orchestra clear-status <key> [--window ID]
-  orchestra list-status [--window ID]
-  orchestra set-progress <float> [--label TEXT] [--window ID]
-  orchestra clear-progress [--window ID]
-  orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID]
-  orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID]
-  orchestra clear-state [--window ID]
-  orchestra set-prompt <text> [--window ID]"
+  orchestra set-status <key> <value> [--icon GLYPH] [--color COLOR] [--window ID | --pane ID]
+  orchestra clear-status <key> [--window ID | --pane ID]
+  orchestra list-status [--window ID | --pane ID]
+  orchestra set-progress <float> [--label TEXT] [--window ID | --pane ID]
+  orchestra clear-progress [--window ID | --pane ID]
+  orchestra notify --title T [--body B] [--subtitle S] [--quiet] [--window ID | --pane ID]
+  orchestra set-state <running|waiting|background|compacting|error|done> [--action TEXT] [--window ID | --pane ID]
+  orchestra clear-state [--window ID | --pane ID]
+  orchestra set-prompt <text> [--window ID | --pane ID]
+
+--pane %N writes pane options, so several agents in one window keep their
+own state; without it the options are window-scoped."
 }
 
 parse_target_flags() {
@@ -54,11 +57,13 @@ cmd_set_status() {
     icon=''
     color=''
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --icon) [ $# -ge 2 ] || usage; icon=$2; shift 2 ;;
             --color) [ $# -ge 2 ] || usage; color=$2; shift 2 ;;
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -66,7 +71,7 @@ cmd_set_status() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     set_opt "$target" "@ab_status_$key" "$value" || ab_tmux_fail 'failed to write status option'
     if [ -n "$icon" ]; then
         set_opt "$target" "@ab_status_${key}__icon" "$icon" || ab_tmux_fail 'failed to write status icon'
@@ -85,9 +90,11 @@ cmd_clear_status() {
     key=$(sanitize_status_key "$1")
     shift
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -95,7 +102,7 @@ cmd_clear_status() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     clear_opt "$target" "@ab_status_$key" || ab_tmux_fail 'failed to clear status'
     clear_opt "$target" "@ab_status_${key}__icon" || ab_tmux_fail 'failed to clear status icon'
     clear_opt "$target" "@ab_status_${key}__color" || ab_tmux_fail 'failed to clear status color'
@@ -103,9 +110,11 @@ cmd_clear_status() {
 
 cmd_list_status() {
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -113,8 +122,8 @@ cmd_list_status() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
-    tmux show-options -w -t "$target" 2>/dev/null | awk '
+    target=$(resolve_target "$win" "$pane")
+    tmux show-options "$(ab_scope "$target")" -t "$target" 2>/dev/null | awk '
         $1 ~ /^@ab_status_/ && $1 !~ /__(icon|color)$/ {
             key = $1
             sub(/^@ab_status_/, "", key)
@@ -132,10 +141,12 @@ cmd_set_progress() {
     shift
     label=''
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --label) [ $# -ge 2 ] || usage; label=$2; shift 2 ;;
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -149,7 +160,7 @@ cmd_set_progress() {
             ;;
     esac
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     set_opt "$target" '@ab_progress' "$progress" || ab_tmux_fail 'failed to write progress'
     if [ -n "$label" ]; then
         set_opt "$target" '@ab_progress_label' "$label" || ab_tmux_fail 'failed to write progress label'
@@ -160,9 +171,11 @@ cmd_set_progress() {
 
 cmd_clear_progress() {
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -170,7 +183,7 @@ cmd_clear_progress() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     clear_opt "$target" '@ab_progress' || ab_tmux_fail 'failed to clear progress'
     clear_opt "$target" '@ab_progress_label' || ab_tmux_fail 'failed to clear progress label'
 }
@@ -181,6 +194,7 @@ cmd_notify() {
     subtitle=''
     quiet=''
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --title) [ $# -ge 2 ] || usage; title=$2; shift 2 ;;
@@ -188,6 +202,7 @@ cmd_notify() {
             --subtitle) [ $# -ge 2 ] || usage; subtitle=$2; shift 2 ;;
             --quiet) quiet=1; shift ;;
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -196,7 +211,7 @@ cmd_notify() {
     [ $# -eq 0 ] || usage
     [ -n "$title" ] || ab_usage 'notify requires --title'
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     summary=$title
     [ -n "$subtitle" ] && summary="$summary — $subtitle"
     [ -n "$body" ] && summary="$summary: $body"
@@ -214,11 +229,13 @@ cmd_set_state() {
     action=''
     spinner=''
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --action) [ $# -ge 2 ] || usage; action=$2; shift 2 ;;
             --spinner) [ $# -ge 2 ] || usage; spinner=$2; shift 2 ;;
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -231,7 +248,7 @@ cmd_set_state() {
         *) ab_usage 'state must be running, waiting, background, compacting, error, or done' ;;
     esac
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     # @ab_finished_at records when the agent last stopped and handed control
     # back: every "done", "background" (the turn ended with background work
     # still running) and "error", and a "waiting" that interrupts a running
@@ -261,9 +278,11 @@ cmd_set_state() {
 
 cmd_clear_state() {
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -271,7 +290,7 @@ cmd_clear_state() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     clear_opt "$target" '@ab_agent_state' || ab_tmux_fail 'failed to clear agent state'
     clear_opt "$target" '@ab_current_action' || ab_tmux_fail 'failed to clear current action'
     clear_opt "$target" '@ab_spinner' || ab_tmux_fail 'failed to clear spinner'
@@ -284,9 +303,11 @@ cmd_set_prompt() {
     prompt=$1
     shift
     win=''
+    pane=''
     while [ $# -gt 0 ]; do
         case "$1" in
             --window) [ $# -ge 2 ] || usage; win=$2; shift 2 ;;
+            --pane) [ $# -ge 2 ] || usage; pane=$2; shift 2 ;;
             --) shift; break ;;
             -*) ab_usage "unknown flag: $1" ;;
             *) break ;;
@@ -294,7 +315,7 @@ cmd_set_prompt() {
     done
     [ $# -eq 0 ] || usage
 
-    target=$(resolve_window "$win")
+    target=$(resolve_target "$win" "$pane")
     if [ -n "$prompt" ]; then
         set_opt "$target" '@ab_last_prompt' "$prompt" || ab_tmux_fail 'failed to write prompt'
     else

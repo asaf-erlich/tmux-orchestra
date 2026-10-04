@@ -104,6 +104,12 @@ sidebar_lists_both() {
     case "$shot" in *other:otherclaude*) printf 1 ;; *) printf 0 ;; esac
 }
 
+# Prints how many sidebar rows are titled after the first window (its pane
+# suffix may be cut off at the sidebar's width).
+first_window_rows() {
+    tmux capture-pane -p -t "$1" | grep -c 'orchestra-tests:fi' || true
+}
+
 "$REPO_DIR/orchestra.tmux"
 mouse_binding=$(tmux list-keys -T root MouseDown1Pane)
 case "$mouse_binding" in
@@ -195,6 +201,25 @@ flaky | test' --window "$window_id"
 assert_eq 'fix the flaky | test' "$(tmux show-options -v -w -t "$window_id" @ab_last_prompt)" 'set-prompt stores the prompt on one line'
 orchestra clear-state --window "$window_id"
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" 'clear-state clears agent state'
+
+# --pane writes pane options and leaves the window's alone; a pane without a
+# value of its own shows its window's in formats.
+pane0=$(tmux display-message -p -t "$window_id.0" '#{pane_id}')
+orchestra set-state running --action 'pane job' --pane "$pane0"
+assert_eq 'running' "$(tmux show-options -v -p -t "$pane0" @ab_agent_state)" '--pane writes the pane option'
+assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" '--pane does not write the window option'
+orchestra set-status phase lint --pane "$pane0"
+assert_eq 'phase	lint' "$(orchestra list-status --pane "$pane0")" 'list-status --pane reads the pane'
+assert_eq '' "$(orchestra list-status --window "$window_id")" 'list-status --window does not see pane status'
+orchestra clear-status phase --pane "$pane0"
+orchestra clear-state --pane "$pane0"
+assert_eq '' "$(tmux show-options -v -p -t "$pane0" @ab_agent_state 2>/dev/null || printf '')" 'clear-state --pane clears the pane option'
+orchestra set-state waiting --window "$window_id"
+assert_eq 'waiting' "$(tmux display-message -p -t "$pane0" '#{@ab_agent_state}')" 'a pane without its own state shows the window state'
+orchestra clear-state --window "$window_id"
+if orchestra set-state running --pane "$window_id" 2>/dev/null; then
+    assert_eq 'usage error' 'accepted' '--pane rejects a non-pane id'
+fi
 
 # Claude Code hook dispatcher. Events arrive as JSON on stdin; the window
 # comes from ORCHESTRA_WINDOW_ID since the test shell has no TMUX_PANE.
@@ -292,11 +317,63 @@ tmux set-option -wq -t "$window_id" @ab_unread 1
 reconcile
 assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
 assert_eq '' "$(opt @ab_unread)" 'reconcile drops the unread the permission prompt left'
+# Each Claude pane is reconciled on its own session: an idle pane's state is
+# cleared while a busy pane in the same window keeps its own.
+start_claude "$window_id"
+second_pane=$claude_pane
+second_pid=$(tmux display-message -p -t "$second_pane" '#{pane_pid}')
+printf '{"status":"busy","statusUpdatedAt":%s}\n' $((now_ms - 60000)) >"$TMP_DIR/claude/sessions/$second_pid.json"
+orchestra set-state waiting --action 'allow? Bash: rm' --pane "$window1_claude_pane"
+orchestra set-state running --action 'Bash: sleep' --pane "$second_pane"
+reconcile
+assert_eq '' "$(tmux show-options -v -p -t "$window1_claude_pane" @ab_agent_state 2>/dev/null || printf '')" 'reconcile clears the idle pane'
+assert_eq 'running' "$(tmux show-options -v -p -t "$second_pane" @ab_agent_state)" 'reconcile keeps the busy pane in the same window'
+tmux kill-pane -t "$second_pane"
+rm -f "$TMP_DIR/claude/sessions/$second_pid.json"
 orchestra set-state background --action '1 background: x' --window "$window_id"
 reconcile
 assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'
 orchestra clear-state --window "$window_id"
 rm -f "$TMP_DIR/claude/sessions/$claude_pid.json"
+
+# Two Claude panes in one window: the hook writes to $TMUX_PANE, so each
+# keeps its own state, prompt and unread, and the first event of a session
+# drops window-level state an earlier version left (every pane would
+# inherit it).
+start_claude "$window_id"
+second_pane=$claude_pane
+pane_hook() {
+    printf '%s' "$3" | TMUX_PANE="$1" orchestra-claude-hook "$2"
+}
+popt() {
+    tmux show-options -v -p -t "$1" "$2" 2>/dev/null || printf ''
+}
+orchestra set-state running --action 'old window state' --window "$window_id"
+orchestra set-prompt 'old window prompt' --window "$window_id"
+pane_hook "$window1_claude_pane" session-start '{"source":"startup"}'
+assert_eq '' "$(opt @ab_agent_state)$(opt @ab_last_prompt)" 'session-start clears window-level state left by an earlier version'
+case "$(popt "$window1_claude_pane" @ab_finished_at)" in
+    ''|*[!0-9]*) assert_eq 'epoch seconds' "$(popt "$window1_claude_pane" @ab_finished_at)" 'session-start stamps the pane start time' ;;
+esac
+pane_hook "$window1_claude_pane" prompt '{"prompt":"first pane task"}'
+pane_hook "$second_pane" prompt '{"prompt":"second pane task"}'
+pane_hook "$second_pane" notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+assert_eq 'running' "$(popt "$window1_claude_pane" @ab_agent_state)" 'the first pane keeps its own state'
+assert_eq 'waiting' "$(popt "$second_pane" @ab_agent_state)" 'the second pane keeps its own state'
+assert_eq 'first pane task' "$(popt "$window1_claude_pane" @ab_last_prompt)" 'the first pane keeps its own prompt'
+assert_eq 'second pane task' "$(popt "$second_pane" @ab_last_prompt)" 'the second pane keeps its own prompt'
+assert_eq '' "$(opt @ab_agent_state)" 'pane hook events do not write the window'
+assert_eq '1' "$(popt "$second_pane" @ab_unread)" 'a permission prompt marks its own pane unread'
+tmux set-option -pqu -t "$second_pane" @ab_unread
+pane_hook "$window1_claude_pane" stop '{}'
+assert_eq '1' "$(popt "$window1_claude_pane" @ab_unread)" 'stop marks the pane unread'
+assert_eq '' "$(popt "$second_pane" @ab_unread)" 'the other pane is not marked unread'
+case "$(popt "$window1_claude_pane" @ab_finished_at)" in
+    ''|*[!0-9]*) assert_eq 'epoch seconds' "$(popt "$window1_claude_pane" @ab_finished_at)" 'stop records the pane finish time' ;;
+esac
+pane_list=$(tmux list-panes -t "$window_id" -F "#{pane_id}=#{@ab_agent_state}" | grep -e "^$window1_claude_pane=" -e "^$second_pane=" | sort | tr '\n' ' ')
+expected_list=$(printf '%s\n' "$window1_claude_pane=" "$second_pane=waiting" | sort | tr '\n' ' ')
+assert_eq "$expected_list" "$pane_list" 'list-panes formats read each pane its own state'
 assert_eq '0' "$(tmux display-message -p -t "$window_id.0" "$ORCHESTRA_CLAUDE_PANE")" 'a shell pane does not count as Claude'
 
 # The sidebar lists only Claude windows, so clicks and the keyboard
@@ -307,62 +384,83 @@ window2_info=$(tmux new-window -t orchestra-tests -P -F '#{window_id}|#{pane_id}
 window2_id=${window2_info%%|*}
 pane2_id=${window2_info#*|}
 start_claude "$window2_id"
+window2_pane=$claude_pane
 stale_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
 orchestra set-state running --action 'Bash: ls' --window "$stale_id"
 
-# Mouse click: orchestra-click <y> <session> selects the listed window at
-# block y/3.
+# Mouse click: orchestra-click <y> <session> selects the listed pane at
+# block y/3: the two Claude panes of the first window (in pane order), then
+# the second Claude window, skipping the plain window.
+w1_panes=$(tmux list-panes -t "$window_id" -F '#{pane_id}' | grep -x -e "$window1_claude_pane" -e "$second_pane")
+w1_first=$(printf '%s\n' "$w1_panes" | sed -n 1p)
+w1_second=$(printf '%s\n' "$w1_panes" | sed -n 2p)
+where_active() {
+    tmux display-message -p -t orchestra-tests '#{window_id}|#{pane_id}'
+}
 tmux select-window -t "$window_id"
 active_before=$(tmux display-message -p -t orchestra-tests '#{window_id}')
 assert_eq "$window_id" "$active_before" 'window 1 is active before click'
-# Y=3 → block 1 → second Claude window, skipping the plain window.
 orchestra-click 3 orchestra-tests
-active_after=$(tmux display-message -p -t orchestra-tests '#{window_id}')
-assert_eq "$window2_id" "$active_after" 'orchestra-click skips non-Claude windows'
-# Y=0 → block 0 → first window.
-orchestra-click 0 orchestra-tests
-active_back=$(tmux display-message -p -t orchestra-tests '#{window_id}')
-assert_eq "$window_id" "$active_back" 'orchestra-click y=0 selects first window'
-# Y=6 → block 2 → only the stale and plain windows remain, neither listed.
+assert_eq "$window_id|$w1_second" "$(where_active)" 'orchestra-click selects the second Claude pane of a window'
+# Y=6 → block 2 → second Claude window, skipping the plain window.
 orchestra-click 6 orchestra-tests
-active_unchanged=$(tmux display-message -p -t orchestra-tests '#{window_id}')
-assert_eq "$window_id" "$active_unchanged" 'orchestra-click past the last Claude window is a no-op'
+assert_eq "$window2_id|$window2_pane" "$(where_active)" 'orchestra-click skips non-Claude windows'
+# Y=0 → block 0 → first pane.
+orchestra-click 0 orchestra-tests
+assert_eq "$window_id|$w1_first" "$(where_active)" 'orchestra-click y=0 selects the first pane'
+# Y=9 → block 3 → only the stale and plain windows remain, neither listed.
+orchestra-click 9 orchestra-tests
+assert_eq "$window_id|$w1_first" "$(where_active)" 'orchestra-click past the last Claude pane is a no-op'
 orchestra-click 999 orchestra-tests
-active_unchanged=$(tmux display-message -p -t orchestra-tests '#{window_id}')
-assert_eq "$window_id" "$active_unchanged" 'orchestra-click out-of-range is a no-op'
+assert_eq "$window_id|$w1_first" "$(where_active)" 'orchestra-click out-of-range is a no-op'
 
 # Keyboard selection: orchestra-select moves @orchestra_selected_window across the
-# Claude windows without switching windows, clamps at both ends, and enter
+# Claude panes without switching windows, clamps at both ends, and enter
 # selects it.
 window3_id=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
 start_claude "$window3_id"
+window3_pane=$claude_pane
 tmux select-window -t "$window_id"
 orchestra-select up orchestra-tests
-assert_eq "$window_id" "$(tmux show-options -gv @orchestra_selected_window)" 'selection starts on the active window and clamps at the top'
+assert_eq "$w1_first" "$(tmux show-options -gv @orchestra_selected_window)" 'selection starts on the active pane and clamps at the top'
 orchestra-select down orchestra-tests
-assert_eq "$window2_id" "$(tmux show-options -gv @orchestra_selected_window)" 'selection skips the plain window'
+assert_eq "$w1_second" "$(tmux show-options -gv @orchestra_selected_window)" 'selection walks the Claude panes of one window'
 orchestra-select down orchestra-tests
-assert_eq "$window3_id" "$(tmux show-options -gv @orchestra_selected_window)" 'selection skips the stale-state window'
+assert_eq "$window2_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection skips the plain window'
 orchestra-select down orchestra-tests
-assert_eq "$window3_id" "$(tmux show-options -gv @orchestra_selected_window)" 'selection clamps at the bottom'
+assert_eq "$window3_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection skips the stale-state window'
+orchestra-select down orchestra-tests
+assert_eq "$window3_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection clamps at the bottom'
 assert_eq "$window_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'moving the selection does not switch windows'
 orchestra-select enter orchestra-tests
-assert_eq "$window3_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'enter selects the highlighted window'
+assert_eq "$window3_id|$window3_pane" "$(where_active)" 'enter selects the highlighted pane'
 assert_eq '' "$(tmux show-options -gv @orchestra_selected_window 2>/dev/null || printf '')" 'enter clears the selection'
-tmux set-option -gq @orchestra_selected_window '@999'
+tmux set-option -gq @orchestra_selected_window '%999'
 orchestra-select up orchestra-tests
-assert_eq "$window2_id" "$(tmux show-options -gv @orchestra_selected_window)" 'a stale selection falls back to the active window'
+assert_eq "$window2_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'a stale selection falls back to the active pane'
 orchestra-select reset orchestra-tests
 assert_eq '' "$(tmux show-options -gv @orchestra_selected_window 2>/dev/null || printf '')" 'reset clears the selection'
+# Enter on a pane of the active window that is not its active pane selects
+# that pane.
+tmux select-window -t "$window_id" \; select-pane -t "$w1_first"
+tmux set-option -gq @orchestra_selected_window "$w1_second"
+orchestra-select enter orchestra-tests
+assert_eq "$window_id|$w1_second" "$(where_active)" 'enter selects another pane of the same window'
+# A non-Claude active pane (the shell) in a window with Claude panes: the
+# selection starts on the previously active pane.
+tmux select-pane -t "$window_id.0"
+orchestra-select enter orchestra-tests
+assert_eq "$window_id|$w1_second" "$(where_active)" 'a non-Claude active pane falls back to the previously active Claude pane'
+tmux select-pane -t "$w1_first"
 # From a window without Claude, the selection falls back to the first
-# Claude window.
+# Claude pane.
 tmux select-window -t "$plain_id"
 orchestra-select down orchestra-tests
-assert_eq "$window2_id" "$(tmux show-options -gv @orchestra_selected_window)" 'a non-Claude active window falls back to the first Claude window'
+assert_eq "$w1_second" "$(tmux show-options -gv @orchestra_selected_window)" 'a non-Claude active window falls back to the first Claude pane'
 orchestra-select reset orchestra-tests
 tmux select-window -t "$plain_id"
 orchestra-select enter orchestra-tests
-assert_eq "$window_id" "$(tmux display-message -p -t orchestra-tests '#{window_id}')" 'enter from a non-Claude window selects the first Claude window'
+assert_eq "$window_id|$w1_first" "$(where_active)" 'enter from a non-Claude window selects the first Claude pane'
 tmux kill-window -t "$window3_id"
 tmux kill-window -t "$plain_id"
 tmux kill-window -t "$stale_id"
@@ -376,22 +474,30 @@ tmux new-session -d -s other
 other_plain=$(tmux display-message -p -t other '#{window_id}')
 other_claude=$(tmux new-window -d -t other -P -F '#{window_id}')
 start_claude "$other_claude"
+other_claude_pane=$claude_pane
 tmux rename-window -t "$window_id" first \; rename-window -t "$window2_id" second \; \
     rename-window -t "$other_plain" otherplain \; rename-window -t "$other_claude" otherclaude
 tmux select-window -t "$window_id"
 orchestra-select down orchestra-tests
-assert_eq "$window2_id" "$(tmux show-options -gv @orchestra_selected_window)" 'selection walks the viewing session first'
 orchestra-select down orchestra-tests
-assert_eq "$other_claude" "$(tmux show-options -gv @orchestra_selected_window)" 'selection continues into the next session, skipping its plain window'
+assert_eq "$window2_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection walks the viewing session first'
 orchestra-select down orchestra-tests
-assert_eq "$other_claude" "$(tmux show-options -gv @orchestra_selected_window)" 'selection clamps at the end of the global list'
+assert_eq "$other_claude_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection continues into the next session, skipping its plain window'
+orchestra-select down orchestra-tests
+assert_eq "$other_claude_pane" "$(tmux show-options -gv @orchestra_selected_window)" 'selection clamps at the end of the global list'
 orchestra-select reset orchestra-tests
 # Viewing "other", whose active window is plain: orchestra-tests' active
 # window is not the viewing client's, so the selection starts on the first
 # listed window.
 orchestra-select down other
-assert_eq "$window2_id" "$(tmux show-options -gv @orchestra_selected_window)" 'only the viewing session has an active window'
+assert_eq "$w1_second" "$(tmux show-options -gv @orchestra_selected_window)" 'only the viewing session has an active window'
 orchestra-select reset orchestra-tests
+
+# The sidebar opens split from the first window's active pane: make that
+# the shell, laid out full height so the sidebar has room for a row per
+# Claude pane. Done before a client attaches, so no focus hook runs.
+tmux set-option -wq -t "$window_id" main-pane-width 60 \; select-layout -t "$window_id" main-vertical \; \
+    select-pane -t "$window_id.0"
 
 # A headless client attached to orchestra-tests, so Enter has a client to
 # switch and the focus hooks fire. Its stdin must never reach EOF: script(1)
@@ -418,10 +524,18 @@ sidebar=$(tmux show-options -gqv @orchestra_sidebar_pane_id)
 [ -n "$sidebar" ] || { printf 'assertion failed: toggle stores the global sidebar pane id\n' >&2; exit 1; }
 assert_eq "orchestra-tests|$window_id" "$(where_pane "$sidebar")" 'toggle opens the sidebar in the current window'
 wait_eq 1 'the sidebar lists the Claude windows of both sessions and no plain window' sidebar_lists_both "$sidebar"
+wait_eq 2 'the window with two Claude panes has a row for each' first_window_rows "$sidebar"
+
+# Focusing a pane clears its own unread, not its neighbour's.
+tmux set-option -pq -t "$w1_second" @ab_unread 1 \; set-option -pq -t "$w1_first" @ab_unread 1
+tmux select-pane -t "$w1_second"
+wait_eq '' 'focusing a pane clears its unread' popt "$w1_second" @ab_unread
+assert_eq '1' "$(popt "$w1_first" @ab_unread)" 'focusing a pane leaves the other pane unread'
+tmux set-option -pqu -t "$w1_first" @ab_unread
 
 # Enter on a window in another session switches the client to it, and the
 # client-session-changed / pane-focus-in hooks bring the sidebar along.
-tmux set-option -gq @orchestra_selected_window "$other_claude"
+tmux set-option -gq @orchestra_selected_window "$other_claude_pane"
 orchestra-select enter orchestra-tests
 wait_eq "other|$other_claude" 'enter across sessions switches the client' where_client
 wait_eq "other|$other_claude" 'the sidebar follows the client into the other session' where_pane "$sidebar"
@@ -431,6 +545,18 @@ assert_eq "$sidebar" "$(tmux show-options -gqv @orchestra_sidebar_pane_id)" 'the
 orchestra-click 0 other
 wait_eq "orchestra-tests|$window_id" 'a click across sessions switches the client' where_client
 wait_eq "orchestra-tests|$window_id" 'the sidebar follows the client back' where_pane "$sidebar"
+
+# Enter on the second Claude pane of a window, from another window whose
+# last active pane was the first: select-window fires pane-focus-in for the
+# first pane, and the follow hook must not select it back.
+tmux select-pane -t "$w1_first"
+tmux select-window -t "$window2_id"
+wait_eq "orchestra-tests|$window2_id" 'the sidebar follows the client to a plain window' where_pane "$sidebar"
+tmux set-option -gq @orchestra_selected_window "$w1_second"
+orchestra-select enter orchestra-tests
+wait_eq "orchestra-tests|$window_id" 'the sidebar follows the client to the picked pane' where_pane "$sidebar"
+sleep 0.5
+assert_eq "$window_id|$w1_second" "$(where_active)" 'enter from another window keeps the picked second pane'
 
 # A sidebar pane killed by hand: follow forgets it instead of failing.
 tmux kill-pane -t "$sidebar"

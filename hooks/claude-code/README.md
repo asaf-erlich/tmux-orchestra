@@ -25,10 +25,14 @@ and pressing Esc while Claude is thinking. For those, the sidebar runs
 `orchestra-claude-hook reconcile` with its background refresh (every
 `@orchestra_bg_interval` seconds, default 10). It reads Claude's own status
 from `~/.claude/sessions/<pid>.json` and clears a running or waiting window
-whose session has been `idle` for at least 3 seconds.
+whose session has been `idle` for at least 3 seconds. Each Claude pane is
+checked against its own session.
 
-The script always exits 0, so a hook never blocks Claude, and does nothing
-outside tmux.
+State is written to the Claude pane (`$TMUX_PANE`) as pane options, so two
+Claude sessions split into one window get a sidebar row each. The first
+session start or prompt after upgrading clears window-level state the
+earlier version left. The script always exits 0, so a hook never blocks
+Claude, and does nothing outside tmux.
 
 For Claude sessions that were already running before the hooks were
 installed, `orchestra-claude-hook backfill` fills in the last prompt, finish
