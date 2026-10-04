@@ -207,6 +207,8 @@ assert_eq 'clear' "$(opt @ab_session_source)" 'session-start after /clear marks 
 assert_eq '' "$(opt @ab_last_prompt)" 'session-start after /clear drops the old prompt'
 hook prompt '{"prompt":"run the\ntests"}'
 assert_eq 'run the tests' "$(opt @ab_last_prompt)" 'prompt hook stores the prompt'
+hook prompt '{"prompt":"<task-notification> <task-id>b1</task-id>"}'
+assert_eq 'run the tests' "$(opt @ab_last_prompt)" 'prompt hook keeps the typed prompt over a task notification'
 assert_eq '' "$(opt @ab_session_source)" 'prompt hook drops the empty-session marker'
 assert_eq 'running' "$(opt @ab_agent_state)" 'prompt hook marks running'
 hook pre-tool '{"tool_name":"Bash","tool_input":{"command":"make test","description":"Run the  tests"}}'
