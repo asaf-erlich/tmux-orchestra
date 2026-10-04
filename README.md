@@ -32,7 +32,8 @@ with upstream, it:
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, tmux.conf options being overwritten, and a
   window that stayed red (or kept spinning) after you rejected a permission
-  prompt or pressed Esc, and a last prompt replaced by a background task's
+  prompt or pressed Esc, an API error marking the window you were
+  looking at unread, and a last prompt replaced by a background task's
   `<task-notification>` markup
 
 See [CHANGELOG.md](CHANGELOG.md) for details.

@@ -78,6 +78,11 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **API error marked a watched window unread.** The `StopFailure` hook
+  marked the window unread even while you were looking at it, so once the
+  error cleared it showed the green "finished, not yet seen" check. It now
+  skips the unread mark for the window an attached client is showing, as
+  Stop and the permission prompt already do.
 - **Background task results shown as the last prompt.** When a background
   task finishes, Claude Code submits its result as a prompt starting with
   `<task-notification>`, and the sidebar showed that markup instead of what

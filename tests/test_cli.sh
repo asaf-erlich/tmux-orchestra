@@ -3,7 +3,9 @@ set -eu
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/orchestra-cli.XXXXXX")
-SOCKET=orchestra-test
+# One socket per run, so concurrent runs (two checkouts, two agents) do not
+# share a tmux server and kill each other's on cleanup.
+SOCKET=orchestra-test-$$
 
 client_pid=''
 # Stops the headless client (see below) and the sleep that feeds its stdin.
@@ -252,6 +254,7 @@ assert_eq '' "$(opt @ab_agent_state)" '/compact ends idle'
 hook stop-failure '{"error":"rate_limit"}'
 assert_eq 'error' "$(opt @ab_agent_state)" 'stop-failure marks error'
 assert_eq 'error: rate_limit' "$(opt @ab_current_action)" 'error names the failure'
+assert_eq '1' "$(opt @ab_unread)" 'stop-failure marks a window nobody is looking at unread'
 hook stop '{}'
 assert_eq '' "$(opt @ab_agent_state)" 'the idle reminder does not mark waiting'
 printf '%s\n' '{"type":"user","message":{"content":"first ask"}}' \
@@ -400,6 +403,13 @@ orchestra-select reset orchestra-tests
     script -q /dev/null tmux attach -t orchestra-tests >/dev/null 2>&1 &
 client_pid=$!
 wait_eq "orchestra-tests|$window_id" 'a headless client attaches' where_client
+
+# With the client showing the window, an API error does not mark it unread.
+tmux set-option -wqu -t "$window_id" @ab_unread
+hook stop-failure '{"error":"rate_limit"}'
+assert_eq 'error' "$(opt @ab_agent_state)" 'stop-failure marks error in a watched window'
+assert_eq '' "$(opt @ab_unread)" 'stop-failure skips unread for a window someone is looking at'
+orchestra clear-state --window "$window_id"
 
 # One sidebar per server, opened in the first window.
 first_pane=$(tmux display-message -p -t "$window_id.0" '#{pane_id}')

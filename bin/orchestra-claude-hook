@@ -161,7 +161,7 @@ event_stop() {
 event_stop_failure() {
     error=$(field .error)
     orchestra set-state error --spinner claude --action "error: ${error:-unknown}" --window "$target"
-    orchestra notify --quiet --title 'Claude Code' --body "stopped: ${error:-error}" --window "$target"
+    looking || orchestra notify --quiet --title 'Claude Code' --body "stopped: ${error:-error}" --window "$target"
 }
 
 event_pre_compact() {
