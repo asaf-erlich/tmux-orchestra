@@ -207,6 +207,8 @@ assert_eq 'clear' "$(opt @ab_session_source)" 'session-start after /clear marks 
 assert_eq '' "$(opt @ab_last_prompt)" 'session-start after /clear drops the old prompt'
 hook prompt '{"prompt":"run the\ntests"}'
 assert_eq 'run the tests' "$(opt @ab_last_prompt)" 'prompt hook stores the prompt'
+hook prompt '{"prompt":"<task-notification> <task-id>b1</task-id>"}'
+assert_eq 'run the tests' "$(opt @ab_last_prompt)" 'prompt hook keeps the typed prompt over a task notification'
 assert_eq '' "$(opt @ab_session_source)" 'prompt hook drops the empty-session marker'
 assert_eq 'running' "$(opt @ab_agent_state)" 'prompt hook marks running'
 hook pre-tool '{"tool_name":"Bash","tool_input":{"command":"make test","description":"Run the  tests"}}'
@@ -287,6 +289,17 @@ tmux set-option -wq -t "$window_id" @ab_unread 1
 reconcile
 assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
 assert_eq '' "$(opt @ab_unread)" 'reconcile drops the unread the permission prompt left'
+# A second Claude pane in the same window that is still busy keeps the state.
+start_claude "$window_id"
+second_pid=$(tmux display-message -p -t "$claude_pane" '#{pane_pid}')
+printf '{"status":"busy","statusUpdatedAt":%s}\n' $((now_ms - 60000)) >"$TMP_DIR/claude/sessions/$second_pid.json"
+orchestra set-state running --action 'Bash: sleep' --window "$window_id"
+reconcile
+assert_eq 'running' "$(opt @ab_agent_state)" 'reconcile keeps a window whose other Claude pane is busy'
+tmux kill-pane -t "$claude_pane"
+rm -f "$TMP_DIR/claude/sessions/$second_pid.json"
+reconcile
+assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears once every Claude pane is idle'
 orchestra set-state background --action '1 background: x' --window "$window_id"
 reconcile
 assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'

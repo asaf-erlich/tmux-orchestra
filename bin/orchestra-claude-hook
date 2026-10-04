@@ -74,7 +74,12 @@ mtime() {
 
 event_prompt() {
     prompt=$(field .prompt)
-    orchestra set-prompt "$prompt" --window "$target"
+    # Claude Code submits background-task results as a prompt wrapped in
+    # tags (<task-notification>...); keep the last prompt you typed.
+    case "$prompt" in
+        '<'*) ;;
+        *) orchestra set-prompt "$prompt" --window "$target" ;;
+    esac
     clear_opt "$target" '@ab_session_source'
     orchestra set-state running --spinner claude --action thinking --window "$target"
 }
@@ -254,14 +259,26 @@ backfill() {
 reconcile() {
     command -v jq >/dev/null 2>&1 || return 0
     now_ms=$(($(date +%s) * 1000))
+    # A window can hold several Claude panes sharing one state: print
+    # "<window> 1" for each pane that has been idle long enough and
+    # "<window> 0" for any other, then clear only windows with no 0.
     tmux list-panes -a -F "#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
     while IFS='|' read -r window pane_pid is_claude state; do
         [ "$is_claude" = 1 ] || continue
         case "$state" in running|waiting) ;; *) continue ;; esac
-        session_file=$(claude_session_file "$pane_pid") || continue
-        idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
-        case "$idle_since" in ''|*[!0-9]*) continue ;; esac
-        [ $((now_ms - idle_since)) -ge 3000 ] || continue
+        idle=0
+        if session_file=$(claude_session_file "$pane_pid"); then
+            idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
+            case "$idle_since" in
+                ''|*[!0-9]*) ;;
+                *) [ $((now_ms - idle_since)) -lt 3000 ] || idle=1 ;;
+            esac
+        fi
+        echo "$window $idle"
+    done |
+    awk '{ seen[$1] = 1; if ($2 == 0) busy[$1] = 1 }
+         END { for (w in seen) if (!(w in busy)) print w }' |
+    while read -r window; do
         # Rejecting the prompt or pressing Esc means you were at the window:
         # drop the unread its permission notification left, or the window
         # would read "finished, not yet seen".

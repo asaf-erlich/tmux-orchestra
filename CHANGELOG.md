@@ -95,6 +95,14 @@ All of them are on the `fix-pane-exists` branch.
   hook now skips the unread mark for the window an attached client is
   showing, as Stop already did, and reconcile drops the unread when it
   clears a window.
+- **Two Claude panes in one window.** Reconcile cleared the window as soon
+  as one of its Claude panes went idle, even while the other was still
+  working. It now clears a window only once every Claude pane in it has been
+  idle for 3 seconds.
+- **Background task results shown as the last prompt.** When a background
+  task finishes, Claude Code submits its result as a prompt starting with
+  `<task-notification>`, and the sidebar showed that markup instead of what
+  you typed. Prompts that start with `<` no longer replace the last prompt.
 - **Focus loop that could crash the terminal.** `orchestra-follow` resolved
   the "current" window against whichever client tmux picked, which could
   make focus hooks fire each other in a loop. In one case iTerm2 grew to
