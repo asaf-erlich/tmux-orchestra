@@ -27,6 +27,10 @@
 #   session-start  SessionStart: /clear and fresh starts leave an empty
 #                  session marker; resume restores the last prompt
 #   session-end    SessionEnd: clear state
+#   reconcile      Not a hook; bin/orchestra-render runs it with the
+#                  background refresh. Clears running/waiting on Claude panes
+#                  whose session reports idle: rejecting a permission prompt
+#                  or pressing Esc ends the turn with no hook at all.
 #   backfill       Not a hook. Fill prompt, finish time and empty-session
 #                  marker for Claude panes already running, from
 #                  ~/.claude/sessions/<pid>.json and the session transcript.
@@ -238,11 +242,29 @@ backfill() {
     done
 }
 
+# Claude keeps its own status (busy, waiting, idle) in its session file.
+# Only a status that has been idle for a few seconds counts, so a hook that
+# just marked a new turn running is not undone before Claude reports busy.
+reconcile() {
+    command -v jq >/dev/null 2>&1 || return 0
+    now_ms=$(($(date +%s) * 1000))
+    tmux list-panes -a -F "#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
+    while IFS='|' read -r window pane_pid is_claude state; do
+        [ "$is_claude" = 1 ] || continue
+        case "$state" in running|waiting) ;; *) continue ;; esac
+        session_file=$(claude_session_file "$pane_pid") || continue
+        idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
+        case "$idle_since" in ''|*[!0-9]*) continue ;; esac
+        [ $((now_ms - idle_since)) -ge 3000 ] || continue
+        orchestra clear-state --window "$window"
+    done
+}
+
 event=${1-}
-if [ "$event" = backfill ]; then
-    backfill
-    exit 0
-fi
+case "$event" in
+    backfill) backfill; exit 0 ;;
+    reconcile) reconcile; exit 0 ;;
+esac
 
 input=$(cat)
 command -v jq >/dev/null 2>&1 || exit 0

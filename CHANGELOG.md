@@ -79,13 +79,16 @@ All of them are on the `fix-pane-exists` branch.
 ### Fixed
 
 - **Window stuck red after rejecting a permission prompt.** Rejecting a
-  prompt (or pressing Esc during a tool call) interrupts the turn, and
-  Claude Code runs no Stop hook after an interrupt, so the window kept
-  showing "allow? ..." until the next prompt. New `post-tool`,
-  `tool-failure` and `permission-denied` events in `orchestra-claude-hook`
+  prompt, or pressing Esc, ends the turn without running any Claude Code
+  hook, so the window kept showing "allow? ..." (or the spinner) until the
+  next prompt. The sidebar's background refresh now runs
+  `orchestra-claude-hook reconcile`, which clears a running or waiting
+  window once Claude's session file has reported `idle` for 3 seconds; the
+  window goes idle within about `@orchestra_bg_interval` seconds (default
+  10). New `post-tool`, `tool-failure` and `permission-denied` events
   (hooks `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` in the
-  template) clear the state on an interrupt or denial, and an approved
-  prompt goes back to running as soon as the tool runs.
+  template) also turn an approved prompt back to running as soon as the
+  tool runs.
 - **Focus loop that could crash the terminal.** `orchestra-follow` resolved
   the "current" window against whichever client tmux picked, which could
   make focus hooks fire each other in a loop. In one case iTerm2 grew to

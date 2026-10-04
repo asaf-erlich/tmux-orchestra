@@ -263,6 +263,33 @@ assert_eq 'second ask' "$(opt @ab_last_prompt)" 'session-start on resume restore
 start_claude "$window_id"
 window1_claude_pane=$claude_pane
 assert_eq '1' "$(tmux display-message -p -t "$window1_claude_pane" "$ORCHESTRA_CLAUDE_PANE")" 'a version-named pane counts as Claude'
+
+# reconcile: a Claude session idle for a few seconds (a rejected permission
+# prompt, Esc) clears running/waiting; a fresh idle or a busy one does not.
+mkdir -p "$TMP_DIR/claude/sessions"
+claude_pid=$(tmux display-message -p -t "$window1_claude_pane" '#{pane_pid}')
+claude_status() {
+    printf '{"status":"%s","statusUpdatedAt":%s}\n' "$1" "$2" >"$TMP_DIR/claude/sessions/$claude_pid.json"
+}
+reconcile() {
+    CLAUDE_CONFIG_DIR="$TMP_DIR/claude" orchestra-claude-hook reconcile
+}
+now_ms=$(($(date +%s) * 1000))
+orchestra set-state waiting --action 'allow? Bash: touch' --window "$window_id"
+claude_status busy $((now_ms - 60000))
+reconcile
+assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile leaves a busy session alone'
+claude_status idle "$now_ms"
+reconcile
+assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile waits before trusting a fresh idle'
+claude_status idle $((now_ms - 60000))
+reconcile
+assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
+orchestra set-state background --action '1 background: x' --window "$window_id"
+reconcile
+assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'
+orchestra clear-state --window "$window_id"
+rm -f "$TMP_DIR/claude/sessions/$claude_pid.json"
 assert_eq '0' "$(tmux display-message -p -t "$window_id.0" "$ORCHESTRA_CLAUDE_PANE")" 'a shell pane does not count as Claude'
 
 # The sidebar lists only Claude windows, so clicks and the keyboard
