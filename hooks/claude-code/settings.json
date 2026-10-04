@@ -20,6 +20,36 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook post-tool"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook tool-failure"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "orchestra-claude-hook permission-denied"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "hooks": [

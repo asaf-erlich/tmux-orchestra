@@ -214,6 +214,21 @@ assert_eq 'Bash: Run the tests' "$(opt @ab_current_action)" 'pre-tool prefers th
 hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
 assert_eq 'waiting' "$(opt @ab_agent_state)" 'a permission prompt marks waiting'
 assert_eq 'allow? Bash: Run the tests' "$(opt @ab_current_action)" 'a permission prompt names the pending tool'
+hook post-tool '{"tool_name":"Bash"}'
+assert_eq 'running' "$(opt @ab_agent_state)" 'an approved tool call goes back to running'
+assert_eq 'Bash: done' "$(opt @ab_current_action)" 'post-tool names the tool'
+hook post-tool '{"tool_name":"Read"}'
+assert_eq 'Bash: done' "$(opt @ab_current_action)" 'post-tool leaves a running window alone'
+hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+hook tool-failure '{"tool_name":"Bash","is_interrupt":true}'
+assert_eq '' "$(opt @ab_agent_state)" 'rejecting a permission prompt (an interrupt) clears the state'
+hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+hook tool-failure '{"tool_name":"Bash","is_interrupt":false,"error":"exit 1"}'
+assert_eq 'running' "$(opt @ab_agent_state)" 'a failed tool run goes back to running'
+hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
+hook permission-denied '{"tool_name":"Bash","reason":"denied"}'
+assert_eq '' "$(opt @ab_agent_state)" 'permission-denied clears the state'
+hook notification '{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}'
 hook stop '{}'
 assert_eq '' "$(opt @ab_agent_state)" 'stop clears the state'
 assert_eq '1' "$(opt @ab_unread)" 'stop marks a window nobody is looking at unread'
@@ -248,6 +263,35 @@ assert_eq 'second ask' "$(opt @ab_last_prompt)" 'session-start on resume restore
 start_claude "$window_id"
 window1_claude_pane=$claude_pane
 assert_eq '1' "$(tmux display-message -p -t "$window1_claude_pane" "$ORCHESTRA_CLAUDE_PANE")" 'a version-named pane counts as Claude'
+
+# reconcile: a Claude session idle for a few seconds (a rejected permission
+# prompt, Esc) clears running/waiting; a fresh idle or a busy one does not.
+mkdir -p "$TMP_DIR/claude/sessions"
+claude_pid=$(tmux display-message -p -t "$window1_claude_pane" '#{pane_pid}')
+claude_status() {
+    printf '{"status":"%s","statusUpdatedAt":%s}\n' "$1" "$2" >"$TMP_DIR/claude/sessions/$claude_pid.json"
+}
+reconcile() {
+    CLAUDE_CONFIG_DIR="$TMP_DIR/claude" orchestra-claude-hook reconcile
+}
+now_ms=$(($(date +%s) * 1000))
+orchestra set-state waiting --action 'allow? Bash: touch' --window "$window_id"
+claude_status busy $((now_ms - 60000))
+reconcile
+assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile leaves a busy session alone'
+claude_status idle "$now_ms"
+reconcile
+assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile waits before trusting a fresh idle'
+claude_status idle $((now_ms - 60000))
+tmux set-option -wq -t "$window_id" @ab_unread 1
+reconcile
+assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
+assert_eq '' "$(opt @ab_unread)" 'reconcile drops the unread the permission prompt left'
+orchestra set-state background --action '1 background: x' --window "$window_id"
+reconcile
+assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'
+orchestra clear-state --window "$window_id"
+rm -f "$TMP_DIR/claude/sessions/$claude_pid.json"
 assert_eq '0' "$(tmux display-message -p -t "$window_id.0" "$ORCHESTRA_CLAUDE_PANE")" 'a shell pane does not count as Claude'
 
 # The sidebar lists only Claude windows, so clicks and the keyboard

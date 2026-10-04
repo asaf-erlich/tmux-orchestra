@@ -139,7 +139,8 @@ printf '\033[?1049h\033[?25l'
 # Background sessions (bin/orchestra-bg-refresh) are polled every
 # @orchestra_bg_interval seconds, read once at start (0 disables), in a
 # background job that nudges this loop when the list changes. At most one
-# runs at a time.
+# runs at a time. The same job clears the state of Claude windows whose
+# session went idle without a hook (orchestra-claude-hook reconcile).
 bg_interval=$(tmux show-options -gqv @orchestra_bg_interval 2>/dev/null) || bg_interval=''
 case "$bg_interval" in '' | *[!0-9]*) bg_interval=10 ;; esac
 bg_ticks=$((bg_interval * 8))
@@ -151,7 +152,10 @@ refresh_bg() {
     if [ -n "$bg_pid" ] && kill -0 "$bg_pid" 2>/dev/null; then
         return 0
     fi
-    "$ORCHESTRA_LIB/../bin/orchestra-bg-refresh" "$$" </dev/null >/dev/null 2>&1 &
+    {
+        "$ORCHESTRA_LIB/../bin/orchestra-claude-hook" reconcile
+        "$ORCHESTRA_LIB/../bin/orchestra-bg-refresh" "$$"
+    } </dev/null >/dev/null 2>&1 &
     bg_pid=$!
 }
 
