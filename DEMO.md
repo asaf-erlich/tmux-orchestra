@@ -46,7 +46,7 @@ Run these in order in one Claude window. Keep the sidebar visible.
 |---|---|---|
 | Empty session | Start a fresh `claude` (step 0.4) | dim grey `∅ empty session` |
 | Working | **Prompt:** `Read README.md and summarize it in three bullets.` | orange spinner (`✻` / `*`) with `Read: …README.md`, the prompt `❯ Read README.md…` on the bottom row, no age |
-| Blocked on you | **Prompt:** `Use Bash to run: touch /tmp/orchestra-demo` | red title and rows, `◐` / `?`, `allow? Bash: …`. Answer the prompt (say no) and it goes back to orange, then idle |
+| Blocked on you | **Prompt:** `Use Bash to run: touch /tmp/orchestra-demo` | red title and rows, `◐` / `?`, `allow? Bash: …`. Approve it and it goes back to orange as soon as the command runs, then idle; reject it and it goes straight to idle (needs the `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` hooks from [#5](https://github.com/asaf-erlich/tmux-orchestra/pull/5); without them it stays red until your next prompt) |
 | Idle, seen | Wait for the reply to finish | plain rows, `❯ <your prompt>`, `now` in the top border, which later becomes `1m`, `5m`, ... |
 | Idle reminder | Wait a minute after a turn ends | stays plain: Claude's "waiting for your input" reminder no longer marks the window red |
 | Waiting on background work | **Prompt:** `Run "sleep 60" with Bash using run_in_background, then end your turn right away without waiting for it.` | blue `◴` / `&` with `1 background: …` for about a minute. When the sleep ends Claude picks the turn back up (orange), then goes idle |
