@@ -37,6 +37,9 @@ All of them are on the `fix-pane-exists` branch.
   from the new `orchestra set-prompt` subcommand.
 - **Empty-session marker.** An idle window with no prompt since `/clear` or
   a fresh start shows a dim `∅ cleared` or `∅ empty session`.
+- **Demo script.** [DEMO.md](DEMO.md) walks through every feature one
+  prompt, command or key at a time, using real Claude Code sessions to show
+  each agent state.
 - **`orchestra-claude-hook`.** One dispatcher for all Claude Code hook
   events replaces the inline `jq` commands in the hook template. The idle
   reminder Claude sends a minute after a turn ends no longer marks the

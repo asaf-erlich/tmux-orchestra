@@ -32,7 +32,8 @@ with upstream, it:
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, and tmux.conf options being overwritten
 
-See [CHANGELOG.md](CHANGELOG.md) for details.
+See [CHANGELOG.md](CHANGELOG.md) for details, and [DEMO.md](DEMO.md) for a
+step-by-step demo of every feature in real Claude Code sessions.
 
 ## Highlights
 
