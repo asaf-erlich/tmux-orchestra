@@ -68,7 +68,9 @@ All of them are on the `fix-pane-exists` branch.
 - **Waiting color is red.** The default `@orchestra_wait_color` changed
   from amber `#d29922` to red `#f85149`, so it no longer looks like the
   running spinner. A running tmux server keeps the old value until you run
-  `tmux set -gu @orchestra_wait_color` and reload the plugin.
+  `tmux set -gu @orchestra_wait_color` and reload the plugin. An open
+  sidebar keeps drawing with the code it started with, so close and reopen
+  it (`prefix + B` twice) to see the new states.
 - **Much faster redraws.** Each redraw is one tmux call and one awk pass
   instead of a process per field and per line. On a macOS host with slow
   process creation, a 9-window redraw went from about 1.5 s to about
