@@ -74,7 +74,12 @@ mtime() {
 
 event_prompt() {
     prompt=$(field .prompt)
-    orchestra set-prompt "$prompt" --window "$target"
+    # Claude Code submits background-task results as a prompt wrapped in
+    # tags (<task-notification>...); keep the last prompt you typed.
+    case "$prompt" in
+        '<'*) ;;
+        *) orchestra set-prompt "$prompt" --window "$target" ;;
+    esac
     clear_opt "$target" '@ab_session_source'
     orchestra set-state running --spinner claude --action thinking --window "$target"
 }

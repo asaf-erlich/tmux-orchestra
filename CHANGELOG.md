@@ -78,6 +78,10 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **Background task results shown as the last prompt.** When a background
+  task finishes, Claude Code submits its result as a prompt starting with
+  `<task-notification>`, and the sidebar showed that markup instead of what
+  you typed. Prompts that start with `<` no longer replace the last prompt.
 - **Window stuck red after rejecting a permission prompt.** Rejecting a
   prompt, or pressing Esc, ends the turn without running any Claude Code
   hook, so the window kept showing "allow? ..." (or the spinner) until the
