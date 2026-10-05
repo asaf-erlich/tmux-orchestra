@@ -26,9 +26,11 @@ Conventions:
    tmux set -g @orchestra_nerd_fonts on
    ```
 
-3. Open the sidebar: `prefix + B`. If it was already open from before an
-   upgrade, press `prefix + B` twice: a running sidebar keeps the code it
-   started with.
+3. Open the sidebar: `prefix + B`. If you upgraded from an earlier
+   version, first reload the plugin so tmux picks up the new hooks
+   (`tmux run-shell /path/to/tmux-orchestra/orchestra.tmux`, or re-source
+   your tmux.conf), then press `prefix + B` twice: a running sidebar keeps
+   the code it started with.
 4. Start Claude in **default permission mode**, so permission prompts
    actually appear (auto and bypass modes skip them):
 
@@ -93,17 +95,19 @@ new one **B**.
 
 | Step | Do this | Sidebar shows |
 |---|---|---|
-| Second row | In a Claude window, split it (`prefix + %`) and run `claude --permission-mode default` in the new pane (B) | a second row for the same window. Both titles get the pane number, `session:window.N` (e.g. `1:0.1` and `1:0.2`), and B shows `∅ empty session` with an age that counts up |
+| Second row | In a Claude window, split it (`prefix + %`) and run `claude --permission-mode default` in the new pane (B) | a second row for the same window. Both titles get a number, `session:window.N` (e.g. `1:0.1` and `1:0.2`), counting the window's Claude panes from the left. The numbers stay the same wherever the sidebar is, and B shows `∅ empty session` with an age that counts up |
 | Independent states | In A, **prompt:** `Run "sleep 60" with Bash using run_in_background, then end your turn right away without waiting for it.` Then in B, **prompt:** `Read README.md and summarize it in three bullets.` | A's row turns blue; B's row turns orange, then idle, while A stays blue |
 | Blocked in one pane | In B, **prompt:** `Use Bash to run: touch /tmp/orchestra-demo3` and answer **No** | only B's row turns red; within about 10 seconds it goes idle again. A's row never changes |
 | Select a pane | Click B's row, or select it with `j`/`k` and press `Enter`. Repeat from another window (`prefix + n` first) | focus jumps to that exact split, not just to its window |
 | Unread per pane | In A, **prompt:** `Run "sleep 20" with Bash, then say done.` and immediately click into B | when A finishes, only A's row shows the green check and the unread dot. Clicking into A clears them |
 | Single-pane windows | Look at any other Claude window | still one row with the plain `session:window` title |
 
-The sidebar moves next to whichever pane has focus, so selecting B puts it
-between the two splits.
+The sidebar always sits at the window's left edge, full height, whichever
+pane has focus. It also gives back the width it took when it leaves, so
+switching windows or toggling it does not shrink your panes.
 
-The first time after upgrading, a Claude pane that was already running may
+The first time after upgrading, reload the plugin (step 0.3), or focusing a
+pane will not clear its unread dot. A Claude pane that was already running may
 lose its prompt line when the other pane starts, until its own next prompt.
 The old version stored that prompt on the window.
 
