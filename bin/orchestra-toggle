@@ -14,7 +14,9 @@ current_window=$(resolve_window '')
 
 sidebar_pane=$(tmux show-options -gqv @orchestra_sidebar_pane_id 2>/dev/null || true)
 if [ -n "$sidebar_pane" ] && pane_exists "$sidebar_pane"; then
+    old_layout=$(tmux display-message -p -t "$sidebar_pane" "$SIDEBAR_LAYOUT_FORMAT" 2>/dev/null || true)
     tmux kill-pane -t "$sidebar_pane" >/dev/null 2>&1 || ab_tmux_fail 'failed to close sidebar'
+    sidebar_layout_restore "$old_layout"
     tmux set-option -gqu @orchestra_sidebar_pane_id \; set-option -gqu @orchestra_sidebar_pid >/dev/null 2>&1 || ab_tmux_fail 'failed to clear sidebar options'
     exit 0
 fi
@@ -27,11 +29,13 @@ case "$width" in
     ''|*[!0-9]*) width=32 ;;
 esac
 
-pane_info=$(tmux split-window -bhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
+layout_before=$(tmux display-message -p -t "$current_window" '#{window_layout}' 2>/dev/null || true)
+pane_info=$(tmux split-window -bfhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
 new_pane=${pane_info%%|*}
 new_pid=${pane_info#*|}
 
 tmux set-option -pt "$new_pane" pane-border-status off >/dev/null 2>&1 || true
+sidebar_layout_save "$current_window" "$layout_before"
 
 tmux set-option -gq @orchestra_sidebar_pane_id "$new_pane" \; \
     set-option -gq @orchestra_sidebar_pid "$new_pid" \; \
