@@ -146,8 +146,9 @@ check_background() {
 check_background
 
 # Per-pane rows (fields 24-26: pane_id, pane_index, active flag): a window
-# with two Claude panes gets one block per pane, titled with the pane index;
-# a window with one keeps the plain title. The active window's active pane
+# with two Claude panes gets one block per pane, numbered .1, .2 by position
+# among its Claude panes, not by pane index (dev:web's panes have indexes 1
+# and 3 and still read .1 and .2); a window with one keeps the plain title. The active window's active pane
 # runs no Claude (the sidebar), so its previously active pane (flag 2) is
 # drawn active. The keyboard selection holds a pane id.
 check_panes() {
@@ -163,7 +164,9 @@ check_panes() {
             NO_COLOR=1 TERM=xterm render_frame 0 | grep -e '^▌━ ' -e '^▌─ '
     }
     actual=$(selected_titles '%2')
-    case "$actual" in '▌─ dev:build.1 '*) ;; *) printf 'render_frame pane selection: %s\n' "$actual" >&2; exit 1 ;; esac
+    case "$actual" in '▌─ dev:build.2 '*) ;; *) printf 'render_frame pane selection: %s\n' "$actual" >&2; exit 1 ;; esac
+    actual=$(selected_titles '%8')
+    case "$actual" in '▌─ dev:web.2 '*) ;; *) printf 'render_frame pane selection (index 3): %s\n' "$actual" >&2; exit 1 ;; esac
 }
 check_panes
 

@@ -366,8 +366,11 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 # seconds, is empty live and fixed in tests; the last four are the state
 # colors, empty for the defaults), then one line per pane of the server
 # (list-panes -a); only Claude panes (field 20) are shown, once each, in input
-# order. A block is titled "session:window", or "session:window.PANE_INDEX"
-# when its window has several Claude panes. The selection is derived from
+# order. A block is titled "session:window", or "session:window.N" when its
+# window has several Claude panes, N being the pane's 1-based position among
+# that window's Claude panes in input (pane-index) order. The sidebar sits at
+# the window's left edge and takes the lowest pane index wherever it is, so
+# pane_index itself would shift as it moves. The selection is derived from
 # fields 18-19. Fields 24-26 are pane_id, pane_index and 1 for the window's
 # active pane, 2 for its previously active one (pane_last), else 0; empty
 # (an older dump) means one block per window as before. A block's id is its
@@ -444,7 +447,8 @@ END {
 		if (mode == "frame") {
 			f[4] = (key == active_id) ? "1" : "0"
 			f[3] = f[1] ":" f[3]
-			if (panes[f[2]] > 1 && f[25] != "") f[3] = f[3] "." f[25]
+			ord[f[2]]++
+			if (panes[f[2]] > 1 && f[24] != "") f[3] = f[3] "." ord[f[2]]
 		}
 		out = out window_block(f, width, frame, nerd, wait_color, sel != "" && (key == sel || f[2] == sel))
 	}
