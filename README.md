@@ -42,7 +42,8 @@ with upstream, it:
   looking at unread, and a last prompt replaced by a background task's
   `<task-notification>` markup
 
-See [CHANGELOG.md](CHANGELOG.md) for details.
+See [CHANGELOG.md](CHANGELOG.md) for details, and [DEMO.md](DEMO.md) for a
+step-by-step demo of every feature in real Claude Code sessions.
 
 ## Highlights
 
