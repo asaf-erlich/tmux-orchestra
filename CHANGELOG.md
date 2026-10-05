@@ -47,8 +47,12 @@ All of them are on the `fix-pane-exists` branch.
   `orchestra-claude-hook backfill`), so another pane in that window may
   show no prompt until its next turn. A new or cleared session now records
   its start time, so its age counts up instead of following the window's
-  activity. Restart the sidebar after upgrading
-  (`prefix + B` twice).
+  activity. After upgrading, reload the plugin
+  (`tmux run-shell /path/to/tmux-orchestra/orchestra.tmux`, or re-source
+  your tmux.conf) so focusing a pane clears its own unread mark; until
+  then the old focus hook clears only the window's, and a pane's green
+  check and unread dot stay. Then restart the sidebar (`prefix + B`
+  twice).
 - **Background Claude Code sessions in the sidebar.** Sessions run by the
   Claude Code daemon (`claude --bg`, sent to the background from an
   interactive session, or launched from FleetView) run in no tmux pane, so
