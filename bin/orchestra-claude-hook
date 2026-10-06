@@ -150,11 +150,13 @@ event_notification() {
 }
 
 # Stop lists the session's background tasks; finished ones may linger in
-# the list. Prints "N background: <first description>" or nothing.
+# the list. An idle agent (a teammate waiting to be messaged) is not doing
+# work either: nothing resumes the turn until someone talks to it.
+# Prints "N background: <first description>" or nothing.
 background_summary() {
     # shellcheck disable=SC2016 # jq program, not shell.
     field '[.background_tasks[]? | select((.status // "running") as $s
-        | ["completed", "failed", "killed", "cancelled", "canceled", "stopped", "done", "error"]
+        | ["completed", "failed", "killed", "cancelled", "canceled", "stopped", "done", "error", "idle"]
         | index($s) | not)]
         | if length == 0 then empty
           else "\(length) background: \(.[0].description // .[0].command // .[0].type // "task")"
