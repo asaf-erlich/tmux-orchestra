@@ -279,6 +279,8 @@ assert_eq 'background' "$(opt @ab_agent_state)" 'stop with a running background 
 assert_eq '1 background: Review the diff' "$(opt @ab_current_action)" 'background names the running task'
 hook stop '{"background_tasks":[{"id":"b2","type":"local_bash","status":"completed","description":"old"}]}'
 assert_eq '' "$(opt @ab_agent_state)" 'stop with only finished background tasks clears the state'
+hook stop '{"background_tasks":[{"id":"c3","type":"local_agent","status":"idle","description":"Open the upstream PR"}]}'
+assert_eq '' "$(opt @ab_agent_state)" 'stop with only an idle background agent clears the state'
 hook pre-compact '{"trigger":"auto"}'
 assert_eq 'compacting' "$(opt @ab_agent_state)" 'pre-compact marks compacting'
 assert_eq 'compacting (auto)' "$(opt @ab_current_action)" 'compacting names the trigger'

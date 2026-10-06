@@ -18,6 +18,12 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **An idle background agent no longer keeps a pane in "background".**
+  The Stop hook treated every background task whose status was not a
+  finished one as running work, so a teammate sitting idle waiting for a
+  message (`"status": "idle"`) left the pane spinning with
+  `1 background: <its goal>` indefinitely. Idle tasks now count as not
+  running, and the turn ends as done.
 - **Pane sizes no longer drift as the sidebar comes and goes.** Entering a
   window took the sidebar's columns from all its panes, and leaving gave
   them all to the left-most one, so every follow or toggle moved width
