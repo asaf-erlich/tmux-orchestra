@@ -30,6 +30,20 @@ sleep_interruptible() {
     wait "$sleep_pid" 2>/dev/null || true
 }
 
+# The dump is "|"-separated with one line per pane, so a "|" or a newline in
+# a free-text value (a Bash command with a pipe, a multi-line command or
+# prompt) would shift that pane's fields or split its line in two. The
+# renderer would then hide the pane while clicks and the keyboard selection
+# (lib/select.sh, which reads no free text) still count it, and every row
+# below it would map to the one above. "${tf}NAME$te" is a format for NAME
+# with "|" shown as "¦" and newlines as spaces. The last prompt only loses
+# its newlines: it comes last, and render_frame rejoins its "|".
+nl='
+'
+tf="#{s/[|]/¦/:#{s/$nl/ /:"
+te='}}'
+pane_format="${tf}session_name$te|#{window_id}|${tf}window_name$te|#{window_active}|#{@ab_agent_state}|${tf}@ab_current_action$te|${tf}@ab_branch$te|${tf}@ab_cwd$te|${tf}@ab_last_cmd$te|#{@ab_progress}|${tf}@ab_progress_label$te|#{@ab_unread}|${tf}@ab_last_notification$te|${tf}@ab_status_phase$te|${tf}@ab_status_phase__icon$te|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|${tf}@ab_session_source$te|#{pane_id}|#{pane_index}|#{?pane_active,1,#{?pane_last,2,0}}|#{s/$nl/ /:@ab_last_prompt}"
+
 redraw() {
     # One tmux call: the sidebar pane's own width (tput cols inside $(...)
     # sees no terminal and reports 80), the global options and the
@@ -46,7 +60,7 @@ redraw() {
     # @orchestra_bg_agents. render_frame shows one block per Claude pane,
     # then the background sessions.
     if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}||#{@orchestra_background_color}|#{@orchestra_compacting_color}|#{@orchestra_error_color}|#{@orchestra_done_color}' \; \
-        list-panes -a -F "#{session_name}|#{window_id}|#{window_name}|#{window_active}|#{@ab_agent_state}|#{@ab_current_action}|#{@ab_branch}|#{@ab_cwd}|#{@ab_last_cmd}|#{@ab_progress}|#{@ab_progress_label}|#{@ab_unread}|#{@ab_last_notification}|#{@ab_status_phase}|#{@ab_status_phase__icon}|#{@ab_status_phase__color}|#{@ab_spinner}|#{@orchestra_selected_window}|#{&&:#{window_active},#{&&:#{pane_active},#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}}}|$ORCHESTRA_CLAUDE_PANE|#{@ab_finished_at}|#{window_activity}|#{@ab_session_source}|#{pane_id}|#{pane_index}|#{?pane_active,1,#{?pane_last,2,0}}|#{@ab_last_prompt}" \; \
+        list-panes -a -F "$pane_format" \; \
         display-message -p '|bg|#{@orchestra_bg_agents}' 2>/dev/null); then
         :
     else
