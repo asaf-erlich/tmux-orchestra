@@ -281,6 +281,8 @@ hook stop '{"background_tasks":[{"id":"b2","type":"local_bash","status":"complet
 assert_eq '' "$(opt @ab_agent_state)" 'stop with only finished background tasks clears the state'
 hook stop '{"background_tasks":[{"id":"c3","type":"local_agent","status":"idle","description":"Open the upstream PR"}]}'
 assert_eq '' "$(opt @ab_agent_state)" 'stop with only an idle background agent clears the state'
+hook stop '{"background_tasks":[{"id":"t4","type":"teammate","status":"running","description":"Goal: open the upstream PR"}]}'
+assert_eq '' "$(opt @ab_agent_state)" 'stop with only a teammate (always reported running) clears the state'
 hook pre-compact '{"trigger":"auto"}'
 assert_eq 'compacting' "$(opt @ab_agent_state)" 'pre-compact marks compacting'
 assert_eq 'compacting (auto)' "$(opt @ab_current_action)" 'compacting names the trigger'
