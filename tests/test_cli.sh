@@ -539,6 +539,21 @@ assert_eq "orchestra-tests|$window_id" "$(where_pane "$sidebar")" 'toggle opens 
 wait_eq 1 'the sidebar lists the Claude windows of both sessions and no plain window' sidebar_lists_both "$sidebar"
 wait_eq 2 'the window with two Claude panes has a row for each' first_window_rows "$sidebar"
 
+# A "|" or a newline in a pane's free text must not hide its row: clicks
+# count every Claude pane, so a hidden row shifts every row below it.
+sidebar_shows_piped_action() {
+    case "$(tmux capture-pane -p -t "$1")" in *'piped ¦ wc'*) printf 1 ;; *) printf 0 ;; esac
+}
+tmux set-option -pq -t "$w1_first" @ab_agent_state running \; \
+    set-option -pq -t "$w1_first" @ab_current_action 'Bash: piped | wc' \; \
+    set-option -pq -t "$w1_first" @ab_last_cmd 'echo piped | wc
+echo second line'
+wait_eq 1 'a "|" in the current action is shown as "¦"' sidebar_shows_piped_action "$sidebar"
+assert_eq 2 "$(first_window_rows "$sidebar")" 'a "|" or a newline in free text keeps the pane listed'
+tmux set-option -pqu -t "$w1_first" @ab_agent_state \; \
+    set-option -pqu -t "$w1_first" @ab_current_action \; \
+    set-option -pqu -t "$w1_first" @ab_last_cmd
+
 # Focusing a pane clears its own unread, not its neighbour's.
 tmux set-option -pq -t "$w1_second" @ab_unread 1 \; set-option -pq -t "$w1_first" @ab_unread 1
 tmux select-pane -t "$w1_second"

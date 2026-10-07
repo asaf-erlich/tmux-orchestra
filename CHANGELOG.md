@@ -18,6 +18,13 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **Clicks select the row under the mouse.** The renderer reads one
+  `|`-separated line per pane, so a `|` or a newline in a pane's free text
+  (a Bash command with a pipe, a multi-line command) shifted its fields or
+  split its line, and the pane's row disappeared. Clicks and the keyboard
+  selection still counted that pane, so every row below it selected the
+  one above. The renderer now shows `|` in free-text fields as `¦` and
+  newlines as spaces.
 - **An idle background agent no longer keeps a pane in "background".**
   The Stop hook treated every background task whose status was not a
   finished one as running work, so a teammate sitting idle waiting for a
