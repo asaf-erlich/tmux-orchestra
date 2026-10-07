@@ -25,6 +25,13 @@ All of them are on the `fix-pane-exists` branch.
   selection still counted that pane, so every row below it selected the
   one above. The renderer now shows `|` in free-text fields as `¦` and
   newlines as spaces.
+- **An agent-team teammate no longer keeps a pane in "background".**
+  Claude Code lists a teammate in the Stop hook's `background_tasks` as
+  `"type": "teammate", "status": "running"` for its whole life, also while
+  it sits idle waiting to be messaged, so the `idle` check below never
+  matched it and the pane went back to the background color after every
+  turn. Teammates are now left out of the count; one that messages back
+  starts a new turn, which marks the pane running again.
 - **An idle background agent no longer keeps a pane in "background".**
   The Stop hook treated every background task whose status was not a
   finished one as running work, so a teammate sitting idle waiting for a
