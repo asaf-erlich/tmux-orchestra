@@ -38,9 +38,9 @@
 #
 # State is written as pane options on the Claude pane ($TMUX_PANE, through
 # `orchestra --pane`), so several Claude sessions in one window keep their
-# own rows; without $TMUX_PANE it falls back to the window. Session start
-# and each prompt clear what an earlier, window-scoped version left on the
-# window, which every pane would otherwise inherit.
+# own rows; without $TMUX_PANE (a session the Claude daemon hosts) it falls
+# back to the window. Session start and each prompt give the pane empty values
+# that hide what is on its window, which every pane would otherwise inherit.
 #
 # Requires jq. Always exits 0 so a hook never blocks Claude.
 
@@ -120,12 +120,13 @@ looking() {
 }
 
 # State lives on the Claude pane, and pane options win over window options,
-# but a pane without a value of its own shows its window's: drop whatever an
-# earlier version (window-scoped) left on the window when a session starts or
-# a turn begins.
+# but a pane without a value of its own shows its window's: hide whatever
+# window-scoped state is there (an earlier version, or another Claude session
+# in the window whose hooks have no $TMUX_PANE, like `claude attach`) when a
+# session starts or a turn begins.
 migrate_window() {
     [ "$scope" = '--pane' ] || return 0
-    clear_window_agent_opts "$target"
+    shadow_pane_agent_opts "$target"
 }
 
 event_notification() {
@@ -236,9 +237,10 @@ backfill() {
     tmux list-panes -a -F "#{pane_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
     while IFS='|' read -r pane pane_pid is_claude state; do
         [ "$is_claude" = 1 ] || continue
-        # Window-scoped state from an earlier version would shadow the pane.
-        clear_window_agent_opts "$pane"
-        if ! session_file=$(claude_session_file "$pane_pid"); then
+        if session_file=$(claude_session_file "$pane_pid"); then
+            # Window-scoped state would show through on a pane with a session.
+            shadow_pane_agent_opts "$pane"
+        else
             # `claude agents` (the background-agent manager) has no session.
             case " $(ps -o command= -p "$pane_pid" 2>/dev/null) $(pgrep -lfP "$pane_pid" 2>/dev/null) " in
                 *' agents '*)
@@ -283,6 +285,27 @@ backfill() {
     done
 }
 
+# Usage: reconcile_pane PANE WINDOW STATE SESSION_FILE
+# STATE is the pane's own state, or its window's when it has none.
+reconcile_pane() {
+    case "$3" in running|waiting) ;; *) return 0 ;; esac
+    idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$4" 2>/dev/null)
+    case "$idle_since" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    [ $((now_ms - idle_since)) -ge 3000 ] || return 0
+    if [ -n "$(get_opt "$1" '@ab_agent_state')" ]; then
+        orchestra clear-state --pane "$1"
+        clear_opt "$1" '@ab_unread'
+    else
+        orchestra clear-state --window "$2"
+        clear_opt "$2" '@ab_unread'
+    fi
+    # Rejecting the prompt or pressing Esc means you were at the pane:
+    # the unread its permission notification left is dropped above, or
+    # the pane would read "finished, not yet seen".
+}
+
 # Claude keeps its own status (busy, waiting, idle) in its session file.
 # Only a status that has been idle for a few seconds counts, so a hook that
 # just marked a new turn running is not undone before Claude reports busy.
@@ -295,23 +318,11 @@ reconcile() {
     tmux list-panes -a -F "#{pane_id}|#{window_id}|#{pane_pid}|$ORCHESTRA_CLAUDE_PANE|#{@ab_agent_state}" 2>/dev/null |
     while IFS='|' read -r pane window pane_pid is_claude state; do
         [ "$is_claude" = 1 ] || continue
-        case "$state" in running|waiting) ;; *) continue ;; esac
         session_file=$(claude_session_file "$pane_pid") || continue
-        idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$session_file" 2>/dev/null)
-        case "$idle_since" in
-            ''|*[!0-9]*) continue ;;
-        esac
-        [ $((now_ms - idle_since)) -ge 3000 ] || continue
-        if [ -n "$(get_opt "$pane" '@ab_agent_state')" ]; then
-            orchestra clear-state --pane "$pane"
-            clear_opt "$pane" '@ab_unread'
-        else
-            orchestra clear-state --window "$window"
-            clear_opt "$window" '@ab_unread'
-        fi
-        # Rejecting the prompt or pressing Esc means you were at the pane:
-        # the unread its permission notification left is dropped above, or
-        # the pane would read "finished, not yet seen".
+        reconcile_pane "$pane" "$window" "$state" "$session_file"
+        # A pane with its own session never shows window-scoped state (a
+        # daemon-hosted session in the window, or an earlier version's).
+        shadow_pane_agent_opts "$pane"
     done
 }
 
