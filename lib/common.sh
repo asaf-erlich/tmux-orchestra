@@ -92,9 +92,21 @@ set_opt() {
     tmux set-option "$(ab_scope "$target")" -q -t "$target" "$option" "$value" >/dev/null 2>&1
 }
 
+# A pane's agent options are emptied, not unset: unset, the pane would show
+# its window's value (see shadow_pane_agent_opts).
 clear_opt() {
     target=$1
     option=$2
+    case "$target" in
+        %*)
+            case " $AB_AGENT_OPTS " in
+                *" $option "*)
+                    tmux set-option -pq -t "$target" "$option" '' >/dev/null 2>&1
+                    return
+                    ;;
+            esac
+            ;;
+    esac
     tmux set-option "$(ab_scope "$target")" -qu -t "$target" "$option" >/dev/null 2>&1
 }
 
@@ -108,19 +120,30 @@ get_opt() {
 # Agent state options the Claude Code hook writes per pane.
 AB_AGENT_OPTS='@ab_agent_state @ab_current_action @ab_spinner @ab_finished_at @ab_unread @ab_last_notification @ab_session_source @ab_last_prompt'
 
-# Usage: clear_window_agent_opts PANE
-# Unsets AB_AGENT_OPTS on PANE's window in one tmux call. Every pane inherits
-# window options, so agent state an earlier version (or a window-scoped
-# `orchestra set-state`) left on the window would otherwise show on every
-# pane without its own value.
-clear_window_agent_opts() {
-    _ab_target=$1
+# Usage: shadow_pane_agent_opts PANE
+# Gives PANE an empty value of its own for each AB_AGENT_OPTS option it has
+# none for, in one tmux call. A pane with no value of its own shows its
+# window's, and window-scoped agent state comes from writers that cannot name
+# a pane: an earlier version, `orchestra set-state --window`, or a Claude
+# session the daemon hosts (`claude --bg`, `claude attach`), whose hooks get
+# no $TMUX_PANE. An empty pane value hides it, so a Claude pane with its own
+# hooks never shows another session's state; clearing the window instead would
+# wipe the state of the session that wrote it.
+shadow_pane_agent_opts() {
+    _ab_pane=$1
+    _ab_own=$(tmux show-options -p -t "$_ab_pane" 2>/dev/null) || return 0
     set --
     for _ab_opt in $AB_AGENT_OPTS; do
+        case "
+$_ab_own
+" in
+            *"
+$_ab_opt "*) continue ;;
+        esac
         [ $# -eq 0 ] || set -- "$@" ';'
-        set -- "$@" set-option -wqu -t "$_ab_target" "$_ab_opt"
+        set -- "$@" set-option -pq -t "$_ab_pane" "$_ab_opt" ''
     done
-    tmux "$@" >/dev/null 2>&1
+    [ $# -eq 0 ] || tmux "$@" >/dev/null 2>&1
 }
 
 set_session_opt() {

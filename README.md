@@ -26,7 +26,9 @@ with upstream, it:
   session and switching your client on Enter or a click
 - gives **each Claude pane its own row**, so two Claude sessions split into
   one window no longer share (and overwrite) one state; they are numbered
-  `.1`, `.2` in pane order, stable wherever the sidebar is
+  `.1`, `.2` in pane order, stable wherever the sidebar is; a session
+  attached from the daemon (`claude attach`) no longer bleeds its state into
+  its neighbours
 - lists **only windows running Claude Code**, so stale state never shows
 - adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
 - shows each window's **finish age**, **last prompt** and an

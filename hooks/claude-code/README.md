@@ -30,8 +30,8 @@ checked against its own session.
 
 State is written to the Claude pane (`$TMUX_PANE`) as pane options, so two
 Claude sessions split into one window get a sidebar row each. The first
-session start or prompt after upgrading clears window-level state the
-earlier version left. The script always exits 0, so a hook never blocks
+session start or prompt after upgrading hides window-level state (the
+earlier version's, or a `claude attach` session's) from the pane. The script always exits 0, so a hook never blocks
 Claude, and does nothing outside tmux.
 
 For Claude sessions that were already running before the hooks were

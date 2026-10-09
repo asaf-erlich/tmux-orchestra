@@ -18,6 +18,15 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **A daemon-hosted Claude session no longer shows on the other panes of its
+  window.** Hooks of a session the Claude daemon hosts (`claude --bg`, then
+  `claude attach`) get no `$TMUX_PANE`, so they write window-scoped options,
+  and every pane without a value of its own inherited them: a second Claude
+  pane in the window showed the same notification and row text. A pane's
+  hooks, `backfill` and the renderer's `reconcile` now give the pane empty
+  values of its own for the agent options, and `clear_opt` empties them on a
+  pane instead of unsetting, so the window's values stay hidden. The hook no
+  longer clears the window's agent options, which wiped that session's state.
 - **Clicks select the row under the mouse.** The renderer reads one
   `|`-separated line per pane, so a `|` or a newline in a pane's free text
   (a Bash command with a pipe, a multi-line command) shifted its fields or

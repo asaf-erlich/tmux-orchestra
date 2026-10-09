@@ -226,7 +226,10 @@ orchestra clear-status phase --pane "$pane0"
 orchestra clear-state --pane "$pane0"
 assert_eq '' "$(tmux show-options -v -p -t "$pane0" @ab_agent_state 2>/dev/null || printf '')" 'clear-state --pane clears the pane option'
 orchestra set-state waiting --window "$window_id"
-assert_eq 'waiting' "$(tmux display-message -p -t "$pane0" '#{@ab_agent_state}')" 'a pane without its own state shows the window state'
+fresh_pane=$(tmux split-window -d -P -F '#{pane_id}' -t "$window_id")
+assert_eq 'waiting' "$(tmux display-message -p -t "$fresh_pane" '#{@ab_agent_state}')" 'a pane never written shows the window state'
+assert_eq '' "$(tmux display-message -p -t "$pane0" '#{@ab_agent_state}')" 'a pane cleared with clear-state --pane keeps its own empty state'
+tmux kill-pane -t "$fresh_pane"
 orchestra clear-state --window "$window_id"
 if orchestra set-state running --pane "$window_id" 2>/dev/null; then
     assert_eq 'usage error' 'accepted' '--pane rejects a non-pane id'
@@ -330,8 +333,9 @@ assert_eq 'waiting' "$(opt @ab_agent_state)" 'reconcile waits before trusting a 
 claude_status idle $((now_ms - 60000))
 tmux set-option -wq -t "$window_id" @ab_unread 1
 reconcile
-assert_eq '' "$(opt @ab_agent_state)" 'reconcile clears waiting once the session is idle'
-assert_eq '' "$(opt @ab_unread)" 'reconcile drops the unread the permission prompt left'
+assert_eq '' "$(tmux display-message -p -t "$window1_claude_pane" '#{@ab_agent_state}#{@ab_unread}')" 'reconcile keeps window-scoped state off a pane with its own session'
+orchestra clear-state --window "$window_id"
+tmux set-option -wqu -t "$window_id" @ab_unread
 # Each Claude pane is reconciled on its own session: an idle pane's state is
 # cleared while a busy pane in the same window keeps its own.
 start_claude "$window_id"
@@ -353,8 +357,8 @@ rm -f "$TMP_DIR/claude/sessions/$claude_pid.json"
 
 # Two Claude panes in one window: the hook writes to $TMUX_PANE, so each
 # keeps its own state, prompt and unread, and the first event of a session
-# drops window-level state an earlier version left (every pane would
-# inherit it).
+# hides window-level state (an earlier version, or a daemon-hosted session
+# whose hooks have no $TMUX_PANE) that every pane would otherwise inherit.
 start_claude "$window_id"
 second_pane=$claude_pane
 pane_hook() {
@@ -366,7 +370,19 @@ popt() {
 orchestra set-state running --action 'old window state' --window "$window_id"
 orchestra set-prompt 'old window prompt' --window "$window_id"
 pane_hook "$window1_claude_pane" session-start '{"source":"startup"}'
-assert_eq '' "$(opt @ab_agent_state)$(opt @ab_last_prompt)" 'session-start clears window-level state left by an earlier version'
+eopt() {
+    tmux display-message -p -t "$1" "#{$2}"
+}
+assert_eq '' "$(eopt "$window1_claude_pane" @ab_agent_state)$(eopt "$window1_claude_pane" @ab_last_prompt)" 'session-start hides window-level state from the pane'
+assert_eq 'running' "$(opt @ab_agent_state)" 'session-start leaves the window state for the session that wrote it'
+orchestra set-state waiting --action 'daemon session' --window "$window_id"
+orchestra notify --quiet --title T --body 'daemon note' --window "$window_id"
+pane_hook "$window1_claude_pane" session-start '{"source":"clear"}'
+assert_eq '' "$(eopt "$window1_claude_pane" @ab_agent_state)$(eopt "$window1_claude_pane" @ab_last_notification)" 'a daemon-hosted session in the window does not show on a pane with its own hooks'
+orchestra set-state running --action 'daemon later' --window "$window_id"
+pane_hook "$window1_claude_pane" stop '{}'
+assert_eq '' "$(eopt "$window1_claude_pane" @ab_agent_state)" 'state the daemon session writes later does not show after the pane clears its own'
+orchestra clear-state --window "$window_id"
 case "$(popt "$window1_claude_pane" @ab_finished_at)" in
     ''|*[!0-9]*) assert_eq 'epoch seconds' "$(popt "$window1_claude_pane" @ab_finished_at)" 'session-start stamps the pane start time' ;;
 esac
