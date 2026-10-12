@@ -75,7 +75,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted,
 | `@ab_last_exit` | prompt hook | 32 chars | Last exit code |
 | `@orchestra_sidebar_width` | orchestra-toggle, after-resize-pane hook | — | Global: cached pane width |
 | `@orchestra_sidebar_pane_id` | orchestra-toggle | — | Global: the sidebar pane ID |
-| `@orchestra_sidebar_pid` | orchestra-toggle | — | Global: renderer PID |
+| `@orchestra_sidebar_pid` | orchestra-render (once it traps SIGUSR1) | — | Global: renderer PID |
 | `@orchestra_selected_window` | lib/select.sh | — | Global: sidebar keyboard selection (pane_id, or `bg:<id>` for a background session); unset = the viewing session's active window's active Claude pane (else its previously active pane, else its first Claude pane) |
 | `@orchestra_layout_before` / `@orchestra_layout_with` | orchestra-follow, orchestra-toggle | — | Window: its layout just before and just after the sidebar entered; restored with `select-layout` when the sidebar leaves if the layout is still the "with" one (`sidebar_layout_save` / `sidebar_layout_restore` in lib/common.sh) |
 | `@orchestra_bg_agents` | orchestra-bg-refresh | — | Global: background Claude sessions, `id;state;started_at;cwd;name` records joined by `\|`; unset when none |
