@@ -1,46 +1,149 @@
 #!/bin/sh
-# Refresh @orchestra_bg_agents, the background Claude Code sessions the
-# sidebar lists after its windows. bin/orchestra-render runs this in the
-# background every @orchestra_bg_interval seconds; `claude agents --json`
-# starts a whole node process, far too slow for the render tick.
+# Refresh @orchestra_bg_agents and @orchestra_orphan_agents, the background
+# and the orphaned Claude Code sessions the sidebar lists after its windows.
+# bin/orchestra-render runs this in the background every
+# @orchestra_bg_interval seconds; `claude agents --json` starts a whole node
+# process, far too slow for the render tick.
 #
 # Usage: orchestra-bg-refresh [RENDERER_PID]
 #
-# The value is one "id;state;started_at;cwd;name" record per session of kind
-# "background" (the daemon's sessions, which no tmux pane runs), joined by
-# "|", with ";", "|", "#" and newlines in the fields replaced by spaces.
-# Sessions a window is attached to (@orchestra_bg_id, set by the window
-# select_bg_open in lib/select.sh opens) are left out: the window lists
-# them. Unset when there are none, @orchestra_background is off, or claude or
-# jq is missing. The renderer is nudged (SIGUSR1) only when the value
-# changed. Always exits 0.
+# @orchestra_bg_agents is one "id;state;started_at;cwd;name" record per
+# session of kind "background" (the daemon's sessions, which no tmux pane
+# runs), joined by "|", with ";", "|", "#" and newlines in the fields
+# replaced by spaces. Sessions a window is attached to (@orchestra_bg_id, set
+# by the window select_bg_open in lib/select.sh opens) are left out: the
+# window lists them. Unset when there are none, @orchestra_background is off,
+# or claude or jq is missing.
+#
+# @orchestra_orphan_agents is one "id;pid;started_at;cwd;name;alive" record
+# per session of kind "interactive" that no tmux pane runs: its pid is not a
+# pane's process or a descendant of one (one ps call), and its id is no
+# pane's @ab_session_id or @ab_resume_id (a restored pane waiting to resume).
+# Newest first, at most 10, formatted like the background records; alive is 1
+# while the pid still runs (a session left behind by a dead tmux server, or
+# in a terminal outside tmux), else 0. Sessions listed in
+# @orchestra_orphan_dismissed (space separated ids, set by the sidebar's x
+# key) are left out, and ids `claude agents` no longer lists are dropped from
+# that option. Unset when there are none or @orchestra_orphans is off.
+#
+# The renderer is nudged (SIGUSR1) only when a value changed. Always exits 0.
 
-out=$(tmux display-message -p '#{@orchestra_background}|#{@orchestra_bg_agents}' \; \
-	list-windows -a -F '#{@orchestra_bg_id}' 2>/dev/null) || exit 0
-header=$(printf '%s\n' "$out" | sed -n 1p)
-attached=$(printf '%s\n' "$out" | sed 1d | tr '\n' ' ')
-enabled=${header%%|*}
-current=${header#*|}
+renderer_pid=${1:-}
 
-value=''
-if [ "$enabled" != 'off' ] && command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+out=$(tmux display-message -p '#{@orchestra_background}' \; \
+	display-message -p '#{@orchestra_orphans}' \; \
+	display-message -p '#{@orchestra_bg_agents}' \; \
+	display-message -p '#{@orchestra_orphan_agents}' \; \
+	display-message -p '#{@orchestra_orphan_dismissed}' \; \
+	list-windows -a -F 'W|#{@orchestra_bg_id}' \; \
+	list-panes -a -F 'P|#{pane_pid}|#{@ab_session_id}|#{@ab_resume_id}' 2>/dev/null) || exit 0
+bg_enabled=$(printf '%s\n' "$out" | sed -n 1p)
+orphan_enabled=$(printf '%s\n' "$out" | sed -n 2p)
+bg_current=$(printf '%s\n' "$out" | sed -n 3p)
+orphan_current=$(printf '%s\n' "$out" | sed -n 4p)
+dismissed=$(printf '%s\n' "$out" | sed -n 5p)
+attached=$(printf '%s\n' "$out" | sed -n 's/^W|//p' | tr '\n' ' ')
+pane_pids=$(printf '%s\n' "$out" | sed -n 's/^P|\([0-9]*\)|.*/\1/p' | tr '\n' ' ')
+known=$(printf '%s\n' "$out" | sed -n 's/^P|[0-9]*|\([^|]*\)|\(.*\)$/\1 \2/p' | tr '\n' ' ')
+
+bg_value=''
+orphan_value=''
+new_dismissed=$dismissed
+if { [ "$bg_enabled" != 'off' ] || [ "$orphan_enabled" != 'off' ]; } &&
+	command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
 	json=$(claude agents --json 2>/dev/null) || exit 0
-	value=$(printf '%s' "$json" | jq -r --arg attached "$attached" '
-		($attached | split(" ")) as $att
-		| [ .[]?
-			| select(.kind == "background" and (.id | type) == "string")
-			| select(.id as $i | any($att[]; . == $i) | not)
-			| [.id, (.state // ""), (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
+	if [ "$bg_enabled" != 'off' ]; then
+		bg_value=$(printf '%s' "$json" | jq -r --arg attached "$attached" '
+			($attached | split(" ")) as $att
+			| [ .[]?
+				| select(.kind == "background" and (.id | type) == "string")
+				| select(.id as $i | any($att[]; . == $i) | not)
+				| [.id, (.state // ""), (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
+				| map(tostring | gsub("[|;#\n\r]"; " "))
+				| join(";") ]
+			| join("|")' 2>/dev/null) || exit 0
+	fi
+	# Without the process table every live session would look orphaned, so
+	# the orphans are left as they were then.
+	ps_out=$(ps -axo pid=,ppid= 2>/dev/null) || ps_out=''
+	orphan_value=$orphan_current
+	if [ "$orphan_enabled" != 'off' ] && [ -n "$ps_out" ]; then
+		orphan_value=''
+		# Pids in a pane's process tree: each process walked up its parents
+		# (bounded, in case of a cycle) to a pane's pid.
+		in_panes=$(printf '%s\n' "$ps_out" | awk -v panes="$pane_pids" '
+			BEGIN { n = split(panes, a, " "); for (i = 1; i <= n; i++) pane[a[i]] = 1 }
+			{ parent[$1] = $2 }
+			END {
+				for (p in parent) {
+					q = p
+					for (d = 0; d < 64 && q != "" && q != 0; d++) {
+						if (q in pane) { printf "%s ", p; break }
+						q = parent[q]
+					}
+				}
+			}')
+		in_panes="$in_panes $pane_pids"
+		records=$(printf '%s' "$json" | jq -r --arg inpanes "$in_panes" --arg known "$known" --arg dismissed "$dismissed" '
+			($inpanes | split(" ")) as $inp
+			| ($known | split(" ")) as $kn
+			| ($dismissed | split(" ")) as $dis
+			| [ .[]?
+				| select(.kind == "interactive" and (.sessionId | type) == "string" and (.pid | type) == "number")
+				| select(.pid as $p | any($inp[]; . == ($p | tostring)) | not)
+				| select(.sessionId as $s | any($kn[]; . == $s) | not)
+				| select(.sessionId as $s | any($dis[]; . == $s) | not) ]
+			| sort_by(-(.startedAt // 0)) | .[:10][]
+			| [.sessionId, .pid, (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
 			| map(tostring | gsub("[|;#\n\r]"; " "))
-			| join(";") ]
-		| join("|")' 2>/dev/null) || exit 0
+			| join(";")' 2>/dev/null) || exit 0
+		# Ids still listed, to forget dismissals of sessions that are gone.
+		listed=$(printf '%s' "$json" | jq -r '[ .[]? | select(.kind == "interactive") | .sessionId? // empty ] | join(" ")' 2>/dev/null) || listed=''
+		new_dismissed=''
+		for id in $dismissed; do
+			case " $listed " in *" $id "*) new_dismissed="${new_dismissed:+$new_dismissed }$id" ;; esac
+		done
+		while IFS=';' read -r id pid rest; do
+			[ -n "$id" ] || continue
+			alive=0
+			kill -0 "$pid" 2>/dev/null && alive=1
+			orphan_value="${orphan_value:+$orphan_value|}$id;$pid;$rest;$alive"
+		done <<EOT
+$records
+EOT
+	elif [ "$orphan_enabled" = 'off' ]; then
+		orphan_value=''
+	fi
 fi
 
-[ "$value" != "$current" ] || exit 0
-if [ -n "$value" ]; then
-	tmux set-option -gq @orchestra_bg_agents "$value" 2>/dev/null || exit 0
-else
-	tmux set-option -gqu @orchestra_bg_agents 2>/dev/null || exit 0
+changed=0
+set --
+if [ "$bg_value" != "$bg_current" ]; then
+	changed=1
+	if [ -n "$bg_value" ]; then
+		set -- "$@" set-option -gq @orchestra_bg_agents "$bg_value"
+	else
+		set -- "$@" set-option -gqu @orchestra_bg_agents
+	fi
 fi
-[ -z "${1:-}" ] || kill -USR1 "$1" 2>/dev/null || true
+if [ "$orphan_value" != "$orphan_current" ]; then
+	changed=1
+	[ $# -eq 0 ] || set -- "$@" ';'
+	if [ -n "$orphan_value" ]; then
+		set -- "$@" set-option -gq @orchestra_orphan_agents "$orphan_value"
+	else
+		set -- "$@" set-option -gqu @orchestra_orphan_agents
+	fi
+fi
+if [ "$new_dismissed" != "$dismissed" ]; then
+	[ $# -eq 0 ] || set -- "$@" ';'
+	if [ -n "$new_dismissed" ]; then
+		set -- "$@" set-option -gq @orchestra_orphan_dismissed "$new_dismissed"
+	else
+		set -- "$@" set-option -gqu @orchestra_orphan_dismissed
+	fi
+fi
+[ $# -gt 0 ] || exit 0
+tmux "$@" 2>/dev/null || exit 0
+[ "$changed" = 0 ] || [ -z "$renderer_pid" ] || kill -USR1 "$renderer_pid" 2>/dev/null || true
 exit 0

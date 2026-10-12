@@ -19,6 +19,10 @@ with upstream, it:
 - lists **background Claude Code sessions** (`claude --bg`, FleetView) under a
   separator, and opens one in a new window with `claude attach` on Enter or a
   click
+- lists **orphaned Claude Code sessions** (sessions in no tmux pane, such as
+  ones left behind by a crashed tmux server) under an `orphaned` separator,
+  titled by their directory, and resumes one in a matching or new window on
+  Enter or a click
 - always puts the sidebar at the **left edge of the window, full height**,
   whichever pane is focused (not between side-by-side panes), and gives each
   window its pane sizes back when the sidebar leaves or closes
@@ -33,7 +37,7 @@ with upstream, it:
 - **survives a tmux crash**: with tmux-resurrect or continuum, the panes that
   ran Claude come back in the sidebar as dim `↺ resume` rows, and Enter or a
   click runs `claude --resume <id>` in them
-- adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
+- adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter, `x` to dismiss an orphaned session)
 - shows each window's **finish age**, **last prompt** and an
   **empty-session** marker
 - gives **each agent state its own color**: working (orange), blocked on
@@ -61,6 +65,8 @@ step-by-step demo of every feature in real Claude Code sessions.
 - Background Claude Code sessions (`claude --bg`, `/background`, FleetView)
   listed under a `background` separator; Enter or a click opens one in a new
   window running `claude attach <id>`
+- Orphaned Claude Code sessions listed under an `orphaned` separator; Enter or
+  a click resumes one, `x` dismisses it
 - Bash and zsh prompt hooks for `cwd` / `branch` / last command
 - Claude Code hook template (working), OpenCode plugin (working), Codex stub
 - Shellcheck-clean shell implementation with tests under `make test`
@@ -193,6 +199,37 @@ seconds (default 10; read when the sidebar opens). To turn it off:
 
 ```sh
 set -g @orchestra_background off   # or: set -g @orchestra_bg_interval 0
+```
+
+#### Orphaned sessions
+
+Interactive Claude Code sessions that run in no tmux pane (the tmux server
+crashed, or the pane was closed with Claude still running, or Claude runs in a
+terminal outside tmux) are listed after the background sessions, below a
+`── orphaned ──` separator, newest first and at most 10. They come from the
+same `claude agents --json` call. A session counts as orphaned when its
+process is not in any pane's process tree and no pane has its id (as
+`@ab_session_id`, or pending as `@ab_resume_id`, see "Restoring after a
+crash"). Each row is titled by the session's directory, with the directory
+below and the age at the right; `● pid N live elsewhere` replaces `↺ resume`
+while the process still runs.
+
+- **Enter or a click** resumes the session with `claude --resume <id>`: in the
+  one shell pane of the viewing session that runs no Claude and sits in the
+  session's directory or in a window named after it (with a `cd` first when it
+  is elsewhere), else in a new window named after the directory, which keeps
+  a shell when Claude exits.
+- A session whose process **still runs** asks first (`kill it and resume?`):
+  two processes would write one session. Only on `y` is it sent SIGTERM, and
+  only while the pid still is a Claude process; the resume starts once it has
+  exited.
+- **`x`** on a selected orphan dismisses it. Dismissed ids are kept in
+  `@orchestra_orphan_dismissed` until `claude agents` no longer lists them.
+
+It shares the refresh above (`@orchestra_bg_interval`). To turn it off:
+
+```sh
+set -g @orchestra_orphans off
 ```
 
 ### OpenCode

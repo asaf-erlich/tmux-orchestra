@@ -801,5 +801,58 @@ orchestra-resurrect restore
 assert_eq '' "$(popt "$resume_shell" @ab_resume_id)" 'restore ignores an id that is not a plain token'
 tmux kill-window -t "$resume_window"
 
+# Orphaned sessions: `orchestra-bg-refresh` lists the interactive sessions of
+# `claude agents --json` that no pane runs. A stub claude on PATH prints canned
+# JSON. att-1111 runs in a pane (its pid is the pane's), pend-4444 waits to
+# resume in one, dism-5555 is dismissed; dead-2222's process is gone and
+# live-3333's runs outside tmux. Newest first, with the alive flag.
+if command -v jq >/dev/null 2>&1; then
+    orphan_window=$(tmux new-window -d -P -F '#{window_id}' -t orchestra-tests)
+    start_claude "$orphan_window"
+    orphan_pane=$claude_pane
+    orphan_pane_pid=$(tmux display-message -p -t "$orphan_pane" '#{pane_pid}')
+    tmux set-option -p -t "$orphan_pane" @ab_session_id 'att-1111'
+    tmux set-option -p -t "${orphan_window}.0" @ab_resume_id 'pend-4444'
+    dead_pid=$(sh -c 'echo $$')
+    sleep 600 &
+    live_pid=$!
+    cat >"$TMP_DIR/agents.json" <<EOF
+[{"pid":$orphan_pane_pid,"kind":"interactive","sessionId":"att-1111","cwd":"/a","startedAt":1799000000000,"name":"a"},
+ {"pid":$dead_pid,"kind":"interactive","sessionId":"dead-2222","cwd":"/b","startedAt":1799000100000,"name":"b;c|d"},
+ {"pid":$live_pid,"kind":"interactive","sessionId":"live-3333","cwd":"/c","startedAt":1799000200000,"name":"c"},
+ {"pid":$dead_pid,"kind":"interactive","sessionId":"dism-5555","cwd":"/d","startedAt":1799000250000,"name":"d"},
+ {"pid":$dead_pid,"kind":"interactive","sessionId":"pend-4444","cwd":"/e","startedAt":1799000260000,"name":"e"},
+ {"pid":1,"id":"bgjob","kind":"background","sessionId":"bgs","cwd":"/","startedAt":1799000300000,"name":"job","state":"working"}]
+EOF
+    mkdir "$TMP_DIR/stub"
+    printf '#!/bin/sh\ncat "%s/agents.json"\n' "$TMP_DIR" >"$TMP_DIR/stub/claude"
+    chmod +x "$TMP_DIR/stub/claude"
+    stub_path=$PATH
+    PATH=$TMP_DIR/stub:$PATH
+    tmux set-option -g @orchestra_orphan_dismissed 'dism-5555 gone-9999'
+    orchestra-bg-refresh
+    assert_eq "live-3333;$live_pid;1799000200;/c;c;1|dead-2222;$dead_pid;1799000100;/b;b c d;0" \
+        "$(tmux show-option -gqv @orchestra_orphan_agents)" 'orphans are the sessions no pane runs, newest first'
+    assert_eq 'dism-5555' "$(tmux show-option -gqv @orchestra_orphan_dismissed)" 'dismissed ids that are no longer listed are forgotten'
+    assert_eq 'bgjob;working;1799000300;/;job' "$(tmux show-option -gqv @orchestra_bg_agents)" 'background sessions are listed as before'
+    # Dismissing leaves the others; with them all gone the option is unset.
+    tmux set-option -g @orchestra_orphan_dismissed 'dism-5555 live-3333 dead-2222'
+    orchestra-bg-refresh
+    assert_eq '' "$(tmux show-option -gqv @orchestra_orphan_agents)" 'dismissed orphans are not listed'
+    tmux set-option -gu @orchestra_orphan_dismissed
+    orchestra-bg-refresh
+    assert_contains "$(tmux show-option -gqv @orchestra_orphan_agents)" 'live-3333' 'orphans return when no longer dismissed'
+    tmux set-option -g @orchestra_orphans off
+    orchestra-bg-refresh
+    assert_eq '' "$(tmux show-option -gqv @orchestra_orphan_agents)" '@orchestra_orphans off hides the section'
+    tmux set-option -gu @orchestra_orphans
+    tmux set-option -gu @orchestra_orphan_agents
+    tmux set-option -gu @orchestra_bg_agents
+    kill "$live_pid" 2>/dev/null || true
+    PATH=$stub_path
+    rm -rf "$TMP_DIR/stub" "$TMP_DIR/agents.json"
+    tmux kill-window -t "$orphan_window"
+fi
+
 # Clean up extra window.
 tmux kill-window -t "$window2_id"

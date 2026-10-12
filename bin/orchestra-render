@@ -62,12 +62,14 @@ redraw() {
     # index and active flag (1 active, 2 previously active) and the last
     # prompt (last, as it may contain "|"). #{@ab_*} reads the pane's own
     # option, else its window's: the Claude Code hook writes pane options,
-    # other writers window options. The last line, "|bg|...", is
-    # @orchestra_bg_agents. render_frame shows one block per Claude pane,
-    # then the background sessions.
+    # other writers window options. The last two lines, "|bg|..." and
+    # "|orphan|...", are @orchestra_bg_agents and @orchestra_orphan_agents.
+    # render_frame shows one block per Claude pane, then the background
+    # sessions, then the orphaned ones.
     if frame_dump=$(tmux display-message -p ${TMUX_PANE:+-t "$TMUX_PANE"} '#{pane_width}|#{@orchestra_nerd_fonts}|#{@orchestra_wait_color}|#{session_name}||#{@orchestra_background_color}|#{@orchestra_compacting_color}|#{@orchestra_error_color}|#{@orchestra_done_color}' \; \
         list-panes -a -F "$pane_format" \; \
-        display-message -p '|bg|#{@orchestra_bg_agents}' 2>/dev/null); then
+        display-message -p '|bg|#{@orchestra_bg_agents}' \; \
+        display-message -p '|orphan|#{@orchestra_orphan_agents}' 2>/dev/null); then
         :
     else
         frame_dump=''
@@ -110,6 +112,11 @@ handle_keys() {
                     ;;
                 k*) delta=$((delta - 1)); rest=${keys#?} ;;
                 j*) delta=$((delta + 1)); rest=${keys#?} ;;
+                x*)
+                    apply_selection "$delta" dismiss
+                    delta=0
+                    rest=${keys#?}
+                    ;;
                 "$cr"* | "$nl"*)
                     apply_selection "$delta" enter
                     delta=0

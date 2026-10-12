@@ -22,6 +22,15 @@ All of them are on the `fix-pane-exists` branch.
   appending to ones already set. This is the one exception to "tmux options
   are the only state store".
 
+- **Orphaned sessions section.** Interactive Claude Code sessions that run in
+  no tmux pane (for instance left behind when tmux crashed before they were
+  saved) are listed under a `── orphaned ──` separator after the background
+  sessions, titled by directory, from the same `claude agents --json` refresh.
+  Enter or a click resumes one in the matching shell pane or a new window; one
+  whose process still runs asks before it is killed
+  (`bin/orchestra-orphan-resume`). `x` dismisses a row
+  (`@orchestra_orphan_dismissed`); `@orchestra_orphans off` hides the section.
+
 ### Changed
 
 - **The sidebar always sits at the left edge of its window, full height.**

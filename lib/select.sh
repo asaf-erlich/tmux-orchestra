@@ -42,19 +42,25 @@ ORCHESTRA_PANE_RANK='#{?window_active,#{?pane_active,1,#{?pane_last,2,3}},0}'
 #                       resume: resume_id is then its @ab_resume_id, else
 #                       empty), in sidebar order (rank 0 outside the
 #                       viewing session's active window), then one
-#                       "bg:<id>|0||" line per background session
+#                       "bg:<id>|0||" line per background session, then one
+#                       "orphan:<id>|0||" line per orphaned session
 #   _sel_nwin           the number of listed panes (not background sessions)
+#   _sel_nbg, _sel_norph  the numbers of background and orphaned sessions
 #   _sel_bg             @orchestra_bg_agents ("id;state;started;cwd;name|...")
+#   _sel_orphan         @orchestra_orphan_agents
+#                       ("id;pid;started;cwd;name;alive|...")
+#   _sel_dismissed      @orchestra_orphan_dismissed (ids, space separated)
 #   _sel_stored         @orchestra_selected_window
 #   _sel_view_session   the viewing session's id
 #   _sel_client         the client to switch, or empty if none is attached
 #   SELECT_SIDEBAR_PID  @orchestra_sidebar_pid
 # Returns 1 if TARGET cannot be resolved.
 select_windows() {
-	_sel_out=$(tmux display-message -p -t "$1" '#{session_id}|#{@orchestra_sidebar_pid}|#{@orchestra_selected_window}' \; \
+	_sel_out=$(tmux display-message -p -t "$1" '#{session_id}|#{@orchestra_sidebar_pid}|#{@orchestra_selected_window}|#{@orchestra_orphan_dismissed}' \; \
 		list-panes -a -F "#{pane_id}|$ORCHESTRA_PANE_RANK|$ORCHESTRA_CLAUDE_PANE|#{session_id}|#{@ab_resume_id}" \; \
 		list-clients -t "$1" -F '>#{client_activity}|#{client_name}' \; \
-		display-message -p -t "$1" '|bg|#{@orchestra_bg_agents}' 2>/dev/null) || return 1
+		display-message -p -t "$1" '|bg|#{@orchestra_bg_agents}' \; \
+		display-message -p -t "$1" '|orphan|#{@orchestra_orphan_agents}' 2>/dev/null) || return 1
 	[ -n "$_sel_out" ] || return 1
 	_sel_windows=''
 	_sel_seen=' '
@@ -63,13 +69,17 @@ select_windows() {
 	_sel_client_act=-1
 	_sel_view_session=''
 	_sel_nwin=0
+	_sel_nbg=0
+	_sel_norph=0
 	_sel_bg=''
+	_sel_orphan=''
+	_sel_dismissed=''
 	SELECT_SIDEBAR_PID=''
 	# The header line (session ids start with $), then pane lines (pane ids
 	# start with %), then client lines (prefixed >). Each Claude pane is kept
 	# once; a pane of a window linked into several sessions is listed under
-	# the first. The last line, "|bg|...", carries the background sessions
-	# (session ids are never empty).
+	# the first. The last two lines, "|bg|..." and "|orphan|...", carry the
+	# background and the orphaned sessions (session ids are never empty).
 	while IFS="|" read -r _sel_a _sel_b _sel_c _sel_d _sel_e; do
 		case "$_sel_a" in
 			%*)
@@ -95,16 +105,25 @@ select_windows() {
 				fi
 				;;
 			'')
-				[ "$_sel_b" = 'bg' ] || continue
-				_sel_bg=$_sel_c
-				[ -z "$_sel_d" ] || _sel_bg="$_sel_bg|$_sel_d"
-				[ -z "$_sel_e" ] || _sel_bg="$_sel_bg|$_sel_e"
+				case "$_sel_b" in
+					bg)
+						_sel_bg=$_sel_c
+						[ -z "$_sel_d" ] || _sel_bg="$_sel_bg|$_sel_d"
+						[ -z "$_sel_e" ] || _sel_bg="$_sel_bg|$_sel_e"
+						;;
+					orphan)
+						_sel_orphan=$_sel_c
+						[ -z "$_sel_d" ] || _sel_orphan="$_sel_orphan|$_sel_d"
+						[ -z "$_sel_e" ] || _sel_orphan="$_sel_orphan|$_sel_e"
+						;;
+				esac
 				;;
 			*)
 				[ -z "$_sel_view_session" ] || continue
 				_sel_view_session=$_sel_a
 				SELECT_SIDEBAR_PID=$_sel_b
 				_sel_stored=$_sel_c
+				_sel_dismissed=$_sel_d
 				;;
 		esac
 	done <<EOF
@@ -121,6 +140,19 @@ EOF
 		[ -n "$_sel_rec" ] || continue
 		_sel_windows="${_sel_windows}bg:${_sel_rec%%;*}|0||
 "
+		_sel_nbg=$((_sel_nbg + 1))
+	done
+	_sel_rest=$_sel_orphan
+	while [ -n "$_sel_rest" ]; do
+		_sel_rec=${_sel_rest%%|*}
+		case "$_sel_rest" in
+			*'|'*) _sel_rest=${_sel_rest#*|} ;;
+			*) _sel_rest='' ;;
+		esac
+		[ -n "$_sel_rec" ] || continue
+		_sel_windows="${_sel_windows}orphan:${_sel_rec%%;*}|0||
+"
+		_sel_norph=$((_sel_norph + 1))
 	done
 }
 
@@ -165,6 +197,10 @@ select_go() {
 			select_bg_open "${_sel_pick#bg:}"
 			return 0
 			;;
+		orphan:*)
+			select_orphan_open "${_sel_pick#orphan:}"
+			return 0
+			;;
 	esac
 	if [ "$_sel_pick_session" = "$_sel_view_session" ] || [ -z "$_sel_client" ]; then
 		tmux set-option -gqu @orchestra_selected_window \; \
@@ -183,10 +219,11 @@ select_go() {
 		set-option -pqu -t "$_sel_pick" @ab_resume_id >/dev/null 2>&1 || true
 }
 
-# Usage: select_move TARGET DELTA [enter]
+# Usage: select_move TARGET DELTA [enter|dismiss]
 # Moves the selection DELTA listed rows down (negative: up), clamped at
 # both ends. With "enter", clears the selection and shows the result instead
-# of storing it (select_go). Two tmux calls. TARGET is as for select_windows.
+# of storing it (select_go). With "dismiss", hides the result if it is an
+# orphaned session (select_orphan_dismiss) and does nothing otherwise. Two tmux calls. TARGET is as for select_windows.
 # Sets SELECT_SIDEBAR_PID. Returns 1 if TARGET cannot be resolved.
 select_move() {
 	_sel_delta=$2
@@ -227,7 +264,9 @@ EOF
 	select_pick "$_sel_cur"
 	[ -n "$_sel_pick" ] || return 0
 
-	if [ -n "$_sel_enter" ]; then
+	if [ "$_sel_enter" = 'dismiss' ]; then
+		case "$_sel_pick" in orphan:*) select_orphan_dismiss "${_sel_pick#orphan:}" ;; esac
+	elif [ -n "$_sel_enter" ]; then
 		select_go
 	else
 		tmux set-option -gq @orchestra_selected_window "$_sel_pick" >/dev/null 2>&1 || true
@@ -289,29 +328,166 @@ EOF
 		>/dev/null 2>&1 || true
 }
 
+# Usage: select_orphan_find ID
+# Looks ID up in _sel_orphan and sets _sel_o_pid, _sel_o_cwd and _sel_o_alive
+# ("id;pid;started;cwd;name;alive" records). Returns 1 when ID is not listed
+# or is not a plain token.
+select_orphan_find() {
+	case "$1" in '' | *[!0-9A-Za-z_-]*) return 1 ;; esac
+	_sel_rest=$_sel_orphan
+	while [ -n "$_sel_rest" ]; do
+		_sel_rec=${_sel_rest%%|*}
+		case "$_sel_rest" in
+			*'|'*) _sel_rest=${_sel_rest#*|} ;;
+			*) _sel_rest='' ;;
+		esac
+		[ "${_sel_rec%%;*}" = "$1" ] || continue
+		# id;pid;started;cwd;name;alive
+		_sel_rec=${_sel_rec#*;}
+		_sel_o_pid=${_sel_rec%%;*}
+		_sel_rec=${_sel_rec#*;}
+		_sel_rec=${_sel_rec#*;}
+		_sel_o_cwd=${_sel_rec%%;*}
+		_sel_o_alive=${_sel_rec##*;}
+		return 0
+	done
+	return 1
+}
+
+# Usage: select_orphan_open ID
+# Enter or a click on an orphaned session. One that no process runs resumes
+# at once (select_orphan_resume). One whose process still runs (alive: in
+# another terminal, or left behind) asks first, on the viewing client, and
+# only then kills it and resumes, so two processes never write one session:
+# bin/orchestra-orphan-resume does both after the confirmation.
+select_orphan_open() {
+	select_orphan_find "$1" || return 0
+	if [ "$_sel_o_alive" != '1' ]; then
+		select_orphan_resume "$1"
+		return 0
+	fi
+	if [ -z "$_sel_client" ]; then
+		tmux display-message "orchestra: pid $_sel_o_pid still runs this session; no client to ask" >/dev/null 2>&1 || true
+		return 0
+	fi
+	tmux confirm-before -t "$_sel_client" \
+		-p "pid $_sel_o_pid still runs this session; kill it and resume? (y/n)" \
+		"run-shell -b '${ORCHESTRA_LIB:-.}/../bin/orchestra-orphan-resume $1 $_sel_view_session'" >/dev/null 2>&1 || true
+}
+
+# Usage: select_orphan_resume ID
+# Resumes orphaned session ID (select_orphan_find) in the viewing session
+# (_sel_view_session). The target is the one shell pane there, other than
+# the sidebar, that runs no Claude and sits in the session's directory or in
+# a window named after it; it gets `claude --resume ID` typed in (after a cd
+# when it is elsewhere). With no such pane, or several, a new window named
+# after the directory opens in it and runs the resume, then keeps a shell.
+# One tmux call to look, one to act.
+select_orphan_resume() {
+	select_orphan_find "$1" || return 0
+	_sel_cwd=$_sel_o_cwd
+	[ -n "$_sel_cwd" ] && [ -d "$_sel_cwd" ] || _sel_cwd=$HOME
+	case "$_sel_cwd" in *"'"*) _sel_cwd=$HOME ;; esac
+	_sel_base=${_sel_cwd%/}
+	_sel_base=${_sel_base##*/}
+	[ -n "$_sel_base" ] || _sel_base=$1
+
+	_sel_target=''
+	_sel_matches=0
+	_sel_panes=$(tmux list-panes -s -t "$_sel_view_session" -F "#{pane_id}|$ORCHESTRA_CLAUDE_PANE|#{m/r:^-?(sh|bash|zsh|fish|dash|ksh|tcsh),#{pane_current_command}}|#{==:#{pane_id},#{@orchestra_sidebar_pane_id}}|#{pane_current_path}|#{window_name}" 2>/dev/null) || _sel_panes=''
+	while IFS='|' read -r _sel_a _sel_b _sel_c _sel_d _sel_e _sel_f; do
+		[ -n "$_sel_a" ] || continue
+		[ "$_sel_b" != '1' ] || continue
+		[ "$_sel_c" = '1' ] || continue
+		[ "$_sel_d" = '0' ] || continue
+		[ "$_sel_e" = "$_sel_cwd" ] || [ "$_sel_f" = "$_sel_base" ] || continue
+		_sel_target=$_sel_a
+		_sel_matches=$((_sel_matches + 1))
+		_sel_target_path=$_sel_e
+	done <<EOF
+$_sel_panes
+EOF
+	if [ "$_sel_matches" -eq 1 ]; then
+		_sel_cmd="claude --resume $1"
+		[ "$_sel_target_path" = "$_sel_cwd" ] || _sel_cmd="cd '$_sel_cwd' && $_sel_cmd"
+		tmux set-option -gqu @orchestra_selected_window \; \
+			select-window -t "$_sel_target" \; \
+			select-pane -t "$_sel_target" \; \
+			send-keys -t "$_sel_target" "$_sel_cmd" Enter >/dev/null 2>&1 || true
+		return 0
+	fi
+	tmux set-option -gqu @orchestra_selected_window \; \
+		new-window -t "$_sel_view_session:" -c "$_sel_cwd" -n "$_sel_base" \
+		"claude --resume $1; exec \"\${SHELL:-sh}\"" >/dev/null 2>&1 || true
+}
+
+# Usage: select_orphan_dismiss ID
+# Hides orphaned session ID: adds it to @orchestra_orphan_dismissed (read by
+# bin/orchestra-bg-refresh, which drops dismissed ids and forgets those no
+# longer listed) and removes its record from @orchestra_orphan_agents now, so
+# the row goes at once. One tmux call.
+select_orphan_dismiss() {
+	case "$1" in '' | *[!0-9A-Za-z_-]*) return 0 ;; esac
+	_sel_kept=''
+	_sel_rest=$_sel_orphan
+	while [ -n "$_sel_rest" ]; do
+		_sel_rec=${_sel_rest%%|*}
+		case "$_sel_rest" in
+			*'|'*) _sel_rest=${_sel_rest#*|} ;;
+			*) _sel_rest='' ;;
+		esac
+		[ -n "$_sel_rec" ] || continue
+		[ "${_sel_rec%%;*}" != "$1" ] || continue
+		_sel_kept="${_sel_kept:+$_sel_kept|}$_sel_rec"
+	done
+	if [ -n "$_sel_kept" ]; then
+		tmux set-option -gq @orchestra_orphan_agents "$_sel_kept" \; \
+			set-option -gq @orchestra_orphan_dismissed "${_sel_dismissed:+$_sel_dismissed }$1" \; \
+			set-option -gqu @orchestra_selected_window >/dev/null 2>&1 || true
+	else
+		tmux set-option -gqu @orchestra_orphan_agents \; \
+			set-option -gq @orchestra_orphan_dismissed "${_sel_dismissed:+$_sel_dismissed }$1" \; \
+			set-option -gqu @orchestra_selected_window >/dev/null 2>&1 || true
+	fi
+}
+
 # Usage: select_row TARGET LINE
 # Shows what sits at 0-based sidebar LINE (a click), as Enter does: pane
 # blocks are 3 lines each (or a 1-line placeholder when there are none),
 # then, when there are background sessions, a 1-line separator and a 3-line
-# block per session (lib/render.sh). The separator and out of range lines
-# are no-ops. Three tmux calls at most.
+# block per session, and the same for orphaned sessions (lib/render.sh). The
+# separators and out of range lines are no-ops. Three tmux calls at most.
 select_row() {
 	select_windows "$1" || return 0
+	_sel_line=$2
 	if [ "$_sel_nwin" -gt 0 ]; then
 		_sel_top=$((_sel_nwin * 3))
 	else
 		_sel_top=1
 	fi
-	if [ "$2" -lt "$_sel_top" ]; then
+	if [ "$_sel_line" -lt "$_sel_top" ]; then
 		[ "$_sel_nwin" -gt 0 ] || return 0
-		select_pick $(($2 / 3 + 1))
-	else
-		_sel_line=$(($2 - _sel_top - 1))
-		[ "$_sel_line" -ge 0 ] || return 0
-		select_pick $((_sel_nwin + _sel_line / 3 + 1))
+		select_pick $((_sel_line / 3 + 1))
+		[ -n "$_sel_pick" ] || return 0
+		select_go
+		return 0
 	fi
-	[ -n "$_sel_pick" ] || return 0
-	select_go
+	_sel_line=$((_sel_line - _sel_top))
+	_sel_first=$_sel_nwin
+	# Background sessions, then orphaned ones: a separator line and 3 lines
+	# each.
+	for _sel_count in "$_sel_nbg" "$_sel_norph"; do
+		[ "$_sel_count" -gt 0 ] || continue
+		if [ "$_sel_line" -lt $((1 + _sel_count * 3)) ]; then
+			[ "$_sel_line" -gt 0 ] || return 0
+			select_pick $((_sel_first + (_sel_line - 1) / 3 + 1))
+			[ -n "$_sel_pick" ] || return 0
+			select_go
+			return 0
+		fi
+		_sel_line=$((_sel_line - 1 - _sel_count * 3))
+		_sel_first=$((_sel_first + _sel_count))
+	done
 }
 
 # Usage: select_reset
