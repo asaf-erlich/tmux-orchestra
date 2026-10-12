@@ -30,6 +30,23 @@ tmux set-environment -g ORCHESTRA 1
 tmux set-environment -g ORCHESTRA_PLUGIN_DIR "$CURRENT_DIR"
 tmux set-environment -g PATH "$CURRENT_DIR/bin:$PATH"
 
+# Survive a tmux server restart: tmux-resurrect (and continuum, whose
+# autosave runs the same hooks) call these after saving and restoring.
+# bin/orchestra-resurrect keeps the pane -> Claude session map in one state
+# file and, on restore, marks the matching panes resumable in the sidebar. A
+# hook already set (in tmux.conf before this runs) is kept and ours appended;
+# set your own hooks before this plugin loads, or append to them, since
+# setting them afterwards replaces ours.
+add_hook() {
+    existing=$(tmux show-option -gqv "$1")
+    case "$existing" in
+        *"$2"*) return 0 ;;
+    esac
+    tmux set-option -gq "$1" "${existing:+$existing; }$2"
+}
+add_hook @resurrect-hook-post-save-all "\"$CURRENT_DIR/bin/orchestra-resurrect\" save"
+add_hook @resurrect-hook-post-restore-all "\"$CURRENT_DIR/bin/orchestra-resurrect\" restore"
+
 key=$(tmux show-option -gvq @orchestra_key)
 [ -n "$key" ] || key=B
 tmux bind-key "$key" run-shell "$CURRENT_DIR/bin/orchestra-toggle"

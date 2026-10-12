@@ -1,0 +1,115 @@
+#!/bin/sh
+# Remember which Claude session each pane runs across a tmux server
+# restart, and offer to resume it afterwards.
+#
+#   orchestra-resurrect save      write the pane -> session map to the state
+#                                 file; run from tmux-resurrect's
+#                                 @resurrect-hook-post-save-all (continuum's
+#                                 autosave runs it too)
+#   orchestra-resurrect restore   read the state file and mark each matching
+#                                 pane that runs no Claude as resumable
+#                                 (@ab_resume_id), from
+#                                 @resurrect-hook-post-restore-all
+#
+# orchestra.tmux installs both hooks. The state file is the one place
+# tmux-orchestra keeps state outside tmux options, because a crash takes the
+# server and its options with it; it is written only here and read only by
+# `restore`, never on the render path. Default
+# ${XDG_STATE_HOME:-$HOME/.local/state}/tmux-orchestra/sessions, or the global
+# option @orchestra_state_file. One line per Claude pane:
+#   session_name <TAB> window_index <TAB> pane_index <TAB> session_id <TAB> cwd
+# Panes are matched by those coordinates (what tmux-resurrect restores them
+# to) and, when both sides know it, by directory, so a pane that came back as
+# something else is left alone. The sidebar then lists the pane as
+# "↺ resume"; Enter or a click types `claude --resume <id>` into it
+# (select_go in lib/select.sh). `save` also keeps panes whose resume is still
+# pending, so an autosave before you resume does not forget them.
+
+BIN_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck disable=SC1091
+. "$BIN_DIR/../lib/common.sh"
+# shellcheck disable=SC1091
+. "$BIN_DIR/../lib/select.sh"
+
+CLAUDE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+tab=$(printf '\t')
+
+state_file() {
+    file=$(tmux show-option -gqv @orchestra_state_file 2>/dev/null) || file=''
+    [ -n "$file" ] || file=${XDG_STATE_HOME:-$HOME/.local/state}/tmux-orchestra/sessions
+    printf '%s\n' "$file"
+}
+
+# One line per pane, "|" in the directory shown as "¦" (as the renderer does)
+# and the session name last since it may contain anything:
+# pane_id|window_index|pane_index|claude flag|@ab_session_id|@ab_resume_id|cwd|session_name
+pane_dump() {
+    tmux list-panes -a -F "#{pane_id}|#{window_index}|#{pane_index}|$ORCHESTRA_CLAUDE_PANE|#{@ab_session_id}|#{@ab_resume_id}|#{s/[|]/¦/:pane_current_path}|#{session_name}"
+}
+
+# Session ids are typed into a shell later: plain tokens only.
+valid_id() {
+    case "$1" in '' | *[!0-9A-Za-z_-]*) return 1 ;; esac
+}
+
+save() {
+    file=$(state_file)
+    dump=$(pane_dump 2>/dev/null) || return 0
+    umask 077
+    mkdir -p "$(dirname -- "$file")" || return 0
+    tmp="$file.$$"
+    printf '%s\n' "$dump" | while IFS='|' read -r pane widx pidx flag sid rid cwd sname; do
+        [ -n "$pane" ] || continue
+        case "$flag" in
+            1) id=$sid ;;
+            2) id=$rid ;;
+            *) continue ;;
+        esac
+        valid_id "$id" || continue
+        printf '%s\t%s\t%s\t%s\t%s\n' "$sname" "$widx" "$pidx" "$id" "$cwd"
+    done >"$tmp" || { rm -f "$tmp"; return 0; }
+    mv -f "$tmp" "$file"
+}
+
+restore() {
+    file=$(state_file)
+    [ -r "$file" ] || return 0
+    records=$(cat "$file")
+    [ -n "$records" ] || return 0
+    have_jq=0
+    command -v jq >/dev/null 2>&1 && have_jq=1
+    pane_dump 2>/dev/null | while IFS='|' read -r pane widx pidx flag _ _ cwd sname; do
+        [ -n "$pane" ] || continue
+        # Running Claude, or already resumable: nothing to do.
+        [ "$flag" = 0 ] || continue
+        found=''
+        while IFS="$tab" read -r fsess fw fp fid fcwd; do
+            [ "$fsess" = "$sname" ] || continue
+            [ "$fw" = "$widx" ] || continue
+            [ "$fp" = "$pidx" ] || continue
+            [ -z "$fcwd" ] || [ -z "$cwd" ] || [ "$fcwd" = "$cwd" ] || continue
+            valid_id "$fid" || continue
+            found=$fid
+            break
+        done <<RECORDS
+$records
+RECORDS
+        [ -n "$found" ] || continue
+        set_opt "$pane" '@ab_resume_id' "$found"
+        # Show what the session was about, from its transcript.
+        [ "$have_jq" = 1 ] || continue
+        transcript=$(find "$CLAUDE_DIR/projects" -maxdepth 2 -name "$found.jsonl" 2>/dev/null | head -n 1)
+        [ -n "$transcript" ] || continue
+        prompt=$(last_prompt "$transcript")
+        [ -z "$prompt" ] || set_opt "$pane" '@ab_last_prompt' "$prompt"
+    done
+    pid=$(tmux show-option -gqv @orchestra_sidebar_pid 2>/dev/null) || pid=''
+    [ -z "$pid" ] || kill -USR1 "$pid" 2>/dev/null || true
+}
+
+case "${1-}" in
+    save) save ;;
+    restore) restore ;;
+    *) ab_usage 'usage: orchestra-resurrect save|restore' ;;
+esac
+exit 0

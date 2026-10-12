@@ -18,12 +18,15 @@
 # active pane, else its first Claude pane), or the first listed pane when
 # that window is not listed.
 
-# tmux format: 1 when the pane runs Claude Code, else 0. The Claude Code
-# binary is named after its version (~/.local/share/claude/versions/X.Y.Z),
-# so pane_current_command is e.g. "2.1.280"; "claude" covers other installs.
-# The sidebar pane runs sh, so it never matches.
+# tmux format: 1 when the pane runs Claude Code, 2 when it does not but has
+# a session to resume (@ab_resume_id, set by `orchestra-resurrect restore`
+# after a server restart), else 0. The Claude Code binary is named after
+# its version (~/.local/share/claude/versions/X.Y.Z), so pane_current_command
+# is e.g. "2.1.280"; "claude" covers other installs. The sidebar pane runs
+# sh, so it never matches. Callers that act on running Claude (backfill,
+# reconcile) compare with 1; the sidebar lists both.
 # shellcheck disable=SC2034 # Read by bin/orchestra-render and the tests.
-ORCHESTRA_CLAUDE_PANE='#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_command}}'
+ORCHESTRA_CLAUDE_PANE='#{?#{m/r:^(claude|[0-9]+\.[0-9]+\.[0-9]+)$,#{pane_current_command}},1,#{?#{@ab_resume_id},2,0}}'
 
 # tmux format for select_windows: 0 outside the active window, else 1 for
 # its active pane, 2 for its previously active pane and 3 for any other.
@@ -34,10 +37,12 @@ ORCHESTRA_PANE_RANK='#{?window_active,#{?pane_active,1,#{?pane_last,2,3}},0}'
 # viewing session: the best ranked Claude pane of its active window (see
 # ORCHESTRA_PANE_RANK) is "active", and its most recently active client is
 # the one Enter and clicks switch. One tmux call. Sets:
-#   _sel_windows        one "pane_id|rank|session_id" line per listed
-#                       (Claude) pane, in sidebar order (rank 0 outside the
+#   _sel_windows        one "pane_id|rank|session_id|resume_id" line per
+#                       listed pane (running Claude, or with a session to
+#                       resume: resume_id is then its @ab_resume_id, else
+#                       empty), in sidebar order (rank 0 outside the
 #                       viewing session's active window), then one
-#                       "bg:<id>|0|" line per background session
+#                       "bg:<id>|0||" line per background session
 #   _sel_nwin           the number of listed panes (not background sessions)
 #   _sel_bg             @orchestra_bg_agents ("id;state;started;cwd;name|...")
 #   _sel_stored         @orchestra_selected_window
@@ -47,7 +52,7 @@ ORCHESTRA_PANE_RANK='#{?window_active,#{?pane_active,1,#{?pane_last,2,3}},0}'
 # Returns 1 if TARGET cannot be resolved.
 select_windows() {
 	_sel_out=$(tmux display-message -p -t "$1" '#{session_id}|#{@orchestra_sidebar_pid}|#{@orchestra_selected_window}' \; \
-		list-panes -a -F "#{pane_id}|$ORCHESTRA_PANE_RANK|$ORCHESTRA_CLAUDE_PANE|#{session_id}" \; \
+		list-panes -a -F "#{pane_id}|$ORCHESTRA_PANE_RANK|$ORCHESTRA_CLAUDE_PANE|#{session_id}|#{@ab_resume_id}" \; \
 		list-clients -t "$1" -F '>#{client_activity}|#{client_name}' \; \
 		display-message -p -t "$1" '|bg|#{@orchestra_bg_agents}' 2>/dev/null) || return 1
 	[ -n "$_sel_out" ] || return 1
@@ -65,16 +70,19 @@ select_windows() {
 	# once; a pane of a window linked into several sessions is listed under
 	# the first. The last line, "|bg|...", carries the background sessions
 	# (session ids are never empty).
-	while IFS="|" read -r _sel_a _sel_b _sel_c _sel_d; do
+	while IFS="|" read -r _sel_a _sel_b _sel_c _sel_d _sel_e; do
 		case "$_sel_a" in
 			%*)
-				[ "$_sel_c" = '1' ] || continue
+				case "$_sel_c" in 1 | 2) ;; *) continue ;; esac
 				case "$_sel_seen" in *" $_sel_a "*) continue ;; esac
 				_sel_seen="$_sel_seen$_sel_a "
 				# window_active is per session; only the viewing session's
 				# active window is the one the client shows.
 				[ "$_sel_d" = "$_sel_view_session" ] || _sel_b=0
-				_sel_windows="$_sel_windows$_sel_a|$_sel_b|$_sel_d
+				# Only a pane that runs no Claude is resumable (the format
+				# already yields 1 for one that does).
+				[ "$_sel_c" = '2' ] || _sel_e=''
+				_sel_windows="$_sel_windows$_sel_a|$_sel_b|$_sel_d|$_sel_e
 "
 				_sel_nwin=$((_sel_nwin + 1))
 				;;
@@ -90,6 +98,7 @@ select_windows() {
 				[ "$_sel_b" = 'bg' ] || continue
 				_sel_bg=$_sel_c
 				[ -z "$_sel_d" ] || _sel_bg="$_sel_bg|$_sel_d"
+				[ -z "$_sel_e" ] || _sel_bg="$_sel_bg|$_sel_e"
 				;;
 			*)
 				[ -z "$_sel_view_session" ] || continue
@@ -110,7 +119,7 @@ EOF
 			*) _sel_rest='' ;;
 		esac
 		[ -n "$_sel_rec" ] || continue
-		_sel_windows="${_sel_windows}bg:${_sel_rec%%;*}|0|
+		_sel_windows="${_sel_windows}bg:${_sel_rec%%;*}|0||
 "
 	done
 }
@@ -118,17 +127,20 @@ EOF
 # Usage: select_pick N
 # Sets _sel_pick (and _sel_pick_session) to the pane id or "bg:<id>" (and
 # its session id) at 1-based position N of _sel_windows, or empty if out of
-# range.
+# range, and _sel_pick_resume to the session id to resume there (a pane that
+# runs no Claude but has an @ab_resume_id), else empty.
 select_pick() {
 	_sel_i=0
 	_sel_pick=''
 	_sel_pick_session=''
-	while IFS="|" read -r _sel_id _sel_act _sel_sess; do
+	_sel_pick_resume=''
+	while IFS="|" read -r _sel_id _sel_act _sel_sess _sel_res; do
 		[ -n "$_sel_id" ] || continue
 		_sel_i=$((_sel_i + 1))
 		if [ "$_sel_i" -eq "$1" ]; then
 			_sel_pick=$_sel_id
 			_sel_pick_session=$_sel_sess
+			_sel_pick_resume=$_sel_res
 			return 0
 		fi
 	done <<EOF
@@ -143,6 +155,10 @@ EOF
 # viewing client (_sel_client, always named: from run-shell or a background
 # process the "current client" is ambiguous) is switched to it first. The
 # client-session-changed and pane-focus-in hooks then move the sidebar.
+# A resumable pane (_sel_pick_resume, see select_pick) then gets
+# `claude --resume ID` typed into it and loses its @ab_resume_id, so the row
+# turns into a running one; a second tmux call. The id is typed into a shell,
+# so anything but a plain token is ignored.
 select_go() {
 	case "$_sel_pick" in
 		bg:*)
@@ -160,6 +176,11 @@ select_go() {
 			select-window -t "$_sel_pick" \; \
 			select-pane -t "$_sel_pick" >/dev/null 2>&1 || true
 	fi
+	case "$_sel_pick_resume" in '' | *[!0-9A-Za-z_-]*) return 0 ;; esac
+	# Unset directly: select.sh does not source lib/common.sh, and this is
+	# not an agent option clear_opt would have to shadow.
+	tmux send-keys -t "$_sel_pick" "claude --resume $_sel_pick_resume" Enter \; \
+		set-option -pqu -t "$_sel_pick" @ab_resume_id >/dev/null 2>&1 || true
 }
 
 # Usage: select_move TARGET DELTA [enter]
@@ -180,7 +201,7 @@ select_move() {
 	_sel_cur=0
 	_sel_active=0
 	_sel_rank=9
-	while IFS="|" read -r _sel_id _sel_act _sel_sess; do
+	while IFS="|" read -r _sel_id _sel_act _sel_sess _sel_res; do
 		[ -n "$_sel_id" ] || continue
 		_sel_n=$((_sel_n + 1))
 		case "$_sel_act" in

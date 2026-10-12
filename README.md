@@ -30,6 +30,9 @@ with upstream, it:
   attached from the daemon (`claude attach`) no longer bleeds its state into
   its neighbours
 - lists **only windows running Claude Code**, so stale state never shows
+- **survives a tmux crash**: with tmux-resurrect or continuum, the panes that
+  ran Claude come back in the sidebar as dim `↺ resume` rows, and Enter or a
+  click runs `claude --resume <id>` in them
 - adds **keyboard selection** (Up/Down, `j`/`k`, mouse wheel, Enter)
 - shows each window's **finish age**, **last prompt** and an
   **empty-session** marker
@@ -121,6 +124,29 @@ run '~/.tmux/plugins/tpm/tpm'
    set -g @orchestra_error_color '#e3b341'       # stopped on an API error
    set -g @orchestra_done_color '#3fb950'        # finished, not yet seen
    ```
+
+## Restoring after a crash
+
+tmux-resurrect (or continuum, which calls the same hooks) brings back your
+sessions, windows and panes after a crash, but not what ran in them. This
+plugin hooks into it so Claude sessions can follow:
+
+1. The Claude Code hook records each pane's session id.
+2. On every resurrect save (continuum autosaves included),
+   `bin/orchestra-resurrect save` writes pane → session id to
+   `${XDG_STATE_HOME:-~/.local/state}/tmux-orchestra/sessions`, or to
+   `@orchestra_state_file` if you set it. This is the only file the plugin
+   keeps outside tmux.
+3. After a restore, `orchestra-resurrect restore` marks the panes that came
+   back as plain shells at the same session, window, pane and directory.
+   They show in the sidebar as dim `↺ resume` rows with the last prompt.
+4. Enter or a click on one types `claude --resume <id>` into that pane. Rows
+   you do not resume are kept for the next save.
+
+`orchestra.tmux` sets `@resurrect-hook-post-save-all` and
+`@resurrect-hook-post-restore-all`, appending to hooks you already set. Set
+yours before the plugin loads (or append to them): setting them afterwards
+replaces ours. Open the sidebar again with the toggle key after a restore.
 
 ## Prompt hooks
 

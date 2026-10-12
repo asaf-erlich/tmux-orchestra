@@ -216,15 +216,18 @@ function with_style(style, c, text,    s) {
 # One window block: exactly three lines (orchestra-click depends on this).
 # f[] holds the pipe-separated fields of one input line (one pane); f[23] is
 # @ab_session_source and f[27] the last prompt with any "|" it contained
-# rejoined.
-function window_block(f, width, frame, nerd, wait_color, selected,    active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
-	active = f[4]; state = f[5]
+# rejoined. f[20] is 2 for a pane that runs no Claude but has a session to
+# resume (@ab_resume_id): it is drawn dim, "↺ resume" on the activity row, no
+# glyph, no age and none of its (stale) agent state.
+function window_block(f, width, frame, nerd, wait_color, selected,    resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
+	resumable = (f[20] == "2")
+	active = f[4]; state = resumable ? "" : f[5]
 
 	# How long ago the agent last finished (@ab_finished_at, falling back to
 	# the last output in the window), right-aligned in the top border. Hidden
 	# while running or compacting: the spinner says more.
 	age = ""
-	if (state != "running" && state != "compacting") {
+	if (state != "running" && state != "compacting" && !resumable) {
 		since = (f[21] != "") ? f[21] : f[22]
 		age = age_text(since)
 	}
@@ -235,14 +238,14 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	if (pad < 0) pad = 0
 
 	idle = !live_state(state)
-	empty = (idle && f[27] == "" && f[23] != "")
-	activity = activity_text(state, f[6], f[8], f[9], f[27], f[23])
+	empty = (idle && !resumable && f[27] == "" && f[23] != "")
+	activity = resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
 	# with Nerd Fonts, a check mark (without, the unread "!" in the border
 	# already says it).
-	unread_done = (idle && !empty && f[12] == "1")
+	unread_done = (idle && !empty && !resumable && f[12] == "1")
 	if (unread_done && nerd == "on") glyph = state_glyph("done", frame, nerd, "")
 	if (glyph != "" && activity != "") activity = trim(width - 3, activity)
 	else if (glyph == "") activity = trim(width - 2, activity)
@@ -252,8 +255,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	pill = ""
 	if (f[14] != "") pill = (f[15] != "") ? f[15] " " f[14] : f[14]
 	ptext = progress_bar(f[10], f[11], nerd)
-	meta = pill
-	if (ptext != "") {
+	meta = resumable ? "" : pill
+	if (ptext != "" && !resumable) {
 		if (meta != "") meta = meta "  "
 		meta = meta ptext
 	}
@@ -261,7 +264,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	# the prompt while the agent works on it, the directory once the prompt or
 	# the empty-session marker took the activity row. The last notification
 	# is only a fallback (unread already shows as the dot).
-	if (meta == "" && f[27] != "" && !idle) meta = "❯ " f[27]
+	if (resumable) meta = (f[27] != "") ? "❯ " f[27] : cwd_label(f[8])
+	else if (meta == "" && f[27] != "" && !idle) meta = "❯ " f[27]
 	else if (meta == "" && (f[27] != "" || empty)) meta = cwd_label(f[8])
 	else if (meta == "") meta = f[13]
 	meta = trim(width - 2, meta)
@@ -287,13 +291,13 @@ function window_block(f, width, frame, nerd, wait_color, selected,    active, st
 	if (active == "1" && needs_you) title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
 	else if (needs_you) title_style = "color"
-	row_style = ((live_state(state) && state != "running") || empty || unread_done) ? "color" : ""
-	row_color = empty ? "#808080" : scolor
+	row_style = ((live_state(state) && state != "running") || empty || unread_done || resumable) ? "color" : ""
+	row_color = (empty || resumable) ? "#808080" : scolor
 
 	# Unread: a red dot replaces the second-to-last character of the top
 	# border, unless the title fills the row (the meta row still shows the
 	# notification summary).
-	show_dot = (f[12] == "1" && pad >= 2)
+	show_dot = (f[12] == "1" && pad >= 2 && !resumable)
 	before_dot = show_dot ? pad - 2 : pad
 
 	out = bs tl h " " be
@@ -402,11 +406,12 @@ mode != "frame" { n++; line[n] = $0; next }
 	# window, i.e. the sidebar has focus.
 	s = $18
 	if ($19 == "1") focused = 1
-	# Field 20 is 1 when the pane runs Claude Code. Other panes are hidden,
+	# Field 20 is 1 when the pane runs Claude Code, 2 when it runs none but
+	# has a session to resume. Other panes are hidden,
 	# which also hides @ab_agent_state etc. left behind when Claude exited
 	# without its Stop hook. A pane of a window linked into several sessions
 	# is listed under the first.
-	if ($20 != "1") next
+	if ($20 != "1" && $20 != "2") next
 	key = ($24 != "") ? $24 : $2
 	if ($4 == "1" && (view == "" || $1 == view)) {
 		rank = ($26 == "1" || $24 == "") ? 1 : ($26 == "2") ? 2 : 3

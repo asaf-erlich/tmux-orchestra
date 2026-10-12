@@ -110,4 +110,30 @@ dump='$1|123|
 |bg|a1$(x);done;;/;job'
 check_click 2 ''
 
+# A pane that runs no Claude but has a session to resume (claude flag 2, the
+# id last) is listed like the others; Enter types the resume command into it
+# and drops the pending id. A pane with flag 0 stays out of the list, and an
+# id that is not a plain token is never typed.
+dump='$1|123|
+%1|1|1|$1|
+%2|3|2|$1|aaaa-1111
+%4|0|0|$1|stale-id
+>100|/dev/ttys001'
+check_click 0 'select-pane -t %1'
+check_click 3 'select-window -t %2 ; select-pane -t %2'
+check_click 3 'send-keys -t %2 claude --resume aaaa-1111 Enter ; set-option -pqu -t %2 @ab_resume_id'
+check_click 6 ''
+: >"$log"
+select_click_running=$(printf '%s' "$_sel_windows" | grep -c 'aaaa-1111')
+[ "$select_click_running" -eq 1 ] || fail 'the resume id travels with its pane'
+: >"$log"
+select_row '%9' 0
+case "$(cat "$log")" in *'send-keys'*) fail 'a running Claude pane is never typed into' ;; esac
+dump='$1|123|
+%2|3|2|$1|x$(y)
+>100|/dev/ttys001'
+: >"$log"
+select_row '%9' 0
+case "$(cat "$log")" in *'send-keys'*) fail 'an id that is not a plain token is not typed' ;; esac
+
 printf 'test_select: ok\n'

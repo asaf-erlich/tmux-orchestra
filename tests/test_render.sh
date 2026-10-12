@@ -121,6 +121,20 @@ check_sessions() {
 }
 check_sessions
 
+# A pane that runs no Claude but has a session to resume (field 20 is 2) is
+# listed dim, "↺ resume" on the activity row, the last prompt (else the
+# directory) below; its stale state, unread flag and age are not shown. A
+# pane with field 20 of 0 stays hidden.
+check_resumable() {
+    actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-resumable.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-resumable.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render resumable mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+}
+check_resumable
+
 # Background sessions (@orchestra_bg_agents, the "|bg|..." line): a separator
 # after the windows, then one 3-line block each, named after the session,
 # with the daemon state mapped onto running/waiting/done and an unknown one

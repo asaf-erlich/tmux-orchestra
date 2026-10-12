@@ -25,7 +25,9 @@
 #   post-compact   PostCompact: back to running after an automatic compaction,
 #                  idle after /compact
 #   session-start  SessionStart: /clear and fresh starts leave an empty
-#                  session marker; resume restores the last prompt
+#                  session marker; resume restores the last prompt; every
+#                  start (and prompt) records the session id in
+#                  @ab_session_id for bin/orchestra-resurrect
 #   session-end    SessionEnd: clear state
 #   reconcile      Not a hook; bin/orchestra-render runs it with the
 #                  background refresh. Clears running/waiting on each Claude
@@ -60,27 +62,24 @@ field() {
     printf '%s' "$input" | jq -r "$1 // empty" 2>/dev/null
 }
 
-# Last prompt the user typed in a transcript: string or text-block content,
-# skipping meta entries, tool results and slash-command/hook markup.
-last_prompt() {
-    [ -r "$1" ] || return 0
-    tail -n 5000 "$1" 2>/dev/null | jq -r '
-        select(.type == "user" and (.isMeta | not))
-        | .message.content
-        | if type == "string" then .
-          elif type == "array" and ([.[]? | select(.type == "tool_result")] | length) == 0
-          then [.[]? | select(.type == "text") | .text] | join(" ")
-          else empty end
-        | gsub("\\s+"; " ") | ltrimstr(" ")
-        | select(. != "" and (startswith("<") | not))' 2>/dev/null | tail -n 1
-}
-
 mtime() {
     date -r "$1" +%s 2>/dev/null || stat -c %Y "$1" 2>/dev/null
 }
 
+# Remember which Claude session this pane runs (@ab_session_id), so
+# `orchestra-resurrect save` can write it down and, after a tmux server
+# restart, the sidebar can offer to resume it. Kept out of AB_AGENT_OPTS:
+# clear-state must not forget it. Pane scope only: a window has no one
+# session.
+record_session_id() {
+    [ "$scope" = '--pane' ] || return 0
+    sid=$(field .session_id)
+    [ -z "$sid" ] || set_opt "$target" '@ab_session_id' "$sid"
+}
+
 event_prompt() {
     migrate_window
+    record_session_id
     prompt=$(field .prompt)
     # Claude Code submits background-task results as a prompt wrapped in
     # tags (<task-notification>...); keep the last prompt you typed.
@@ -206,6 +205,10 @@ event_session_start() {
     source=$(field .source)
     [ "$source" = 'compact' ] && return 0
     migrate_window
+    record_session_id
+    # A session started here, by hand or by the sidebar's resume: whatever
+    # was waiting to be resumed is no longer.
+    clear_opt "$target" '@ab_resume_id'
     orchestra clear-state "$scope" "$target"
     case "$source" in
         clear|startup)
