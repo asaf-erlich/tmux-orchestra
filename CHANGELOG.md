@@ -7,6 +7,21 @@ All of them are on the `fix-pane-exists` branch.
 
 ## Unreleased
 
+### Added
+
+- **Resume Claude sessions after a tmux crash.** The Claude Code hook now
+  records each pane's session id (`@ab_session_id`). New
+  `bin/orchestra-resurrect` saves the pane → session map to a state file
+  (`@orchestra_state_file`, default
+  `${XDG_STATE_HOME:-~/.local/state}/tmux-orchestra/sessions`) from
+  tmux-resurrect's `@resurrect-hook-post-save-all`, and on
+  `@resurrect-hook-post-restore-all` marks the matching panes that run no
+  Claude as resumable (`@ab_resume_id`). The sidebar lists them dim as
+  `↺ resume` with the last prompt, and Enter or a click types
+  `claude --resume <id>` into the pane. `orchestra.tmux` installs both hooks,
+  appending to ones already set. This is the one exception to "tmux options
+  are the only state store".
+
 ### Changed
 
 - **The sidebar always sits at the left edge of its window, full height.**

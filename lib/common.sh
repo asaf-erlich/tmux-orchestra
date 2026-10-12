@@ -117,6 +117,22 @@ get_opt() {
     tmux show-options -v "$(ab_scope "$target")" -t "$target" "$option" 2>/dev/null || printf ''
 }
 
+# Last prompt the user typed in a transcript: string or text-block content,
+# skipping meta entries, tool results and slash-command/hook markup.
+# Needs jq (the hook and orchestra-resurrect check for it first).
+last_prompt() {
+    [ -r "$1" ] || return 0
+    tail -n 5000 "$1" 2>/dev/null | jq -r '
+        select(.type == "user" and (.isMeta | not))
+        | .message.content
+        | if type == "string" then .
+          elif type == "array" and ([.[]? | select(.type == "tool_result")] | length) == 0
+          then [.[]? | select(.type == "text") | .text] | join(" ")
+          else empty end
+        | gsub("\\s+"; " ") | ltrimstr(" ")
+        | select(. != "" and (startswith("<") | not))' 2>/dev/null | tail -n 1
+}
+
 # Agent state options the Claude Code hook writes per pane.
 AB_AGENT_OPTS='@ab_agent_state @ab_current_action @ab_spinner @ab_finished_at @ab_unread @ab_last_notification @ab_session_source @ab_last_prompt'
 

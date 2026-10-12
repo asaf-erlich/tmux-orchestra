@@ -2,7 +2,7 @@
 
 ## Project overview
 
-tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane (one per tmux server) showing, for each window running Claude Code in any session, the agent state (running/waiting/done), status pills, progress bars, and notifications. State flows exclusively through tmux user-options (`@ab_*`); there are no daemons, sockets, or files outside tmux itself. The renderer polls every 125 ms and wakes early on SIGUSR1.
+tmux-orchestra is a pure POSIX shell tmux plugin that renders a live sidebar pane (one per tmux server) showing, for each window running Claude Code in any session, the agent state (running/waiting/done), status pills, progress bars, and notifications. Live state flows exclusively through tmux user-options (`@ab_*`); there are no daemons or sockets, and nothing is written to disk on the render or hook path. The one exception is a small session-id file that survives a tmux server restart (see "No new persistent state outside tmux options"). The renderer polls every 125 ms and wakes early on SIGUSR1.
 
 ## Repository layout
 
@@ -18,6 +18,7 @@ bin/
   orchestra-select      Move/confirm the sidebar keyboard selection
   orchestra-claude-hook Claude Code hook dispatcher (JSON on stdin) + backfill
   orchestra-bg-refresh  Poll `claude agents --json` into @orchestra_bg_agents
+  orchestra-resurrect   save/restore the pane → Claude session map (tmux-resurrect hooks)
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
   select.sh             Claude-window filter, keyboard selection, click mapping
@@ -57,6 +58,8 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted,
 | `@ab_agent_state` | harness hook | — | `running` \| `waiting` \| `background` \| `compacting` \| `error` \| `done` \| empty |
 | `@ab_current_action` | harness hook | 120 chars | Tool name or prompt text |
 | `@ab_last_prompt` | `orchestra set-prompt` | 120 chars | Last prompt sent to the agent; survives `clear-state` |
+| `@ab_session_id` | `orchestra-claude-hook` | — | The Claude session id the pane runs (SessionStart, UserPromptSubmit); not an agent option, so `clear-state` keeps it |
+| `@ab_resume_id` | `orchestra-resurrect restore` | — | A session to resume in a pane that runs no Claude (after a server restart); cleared on SessionStart or when Enter resumes it |
 | `@ab_session_source` | `orchestra-claude-hook` | — | `clear` \| `startup` \| `empty` \| `agents` while no prompt since then; unset after a prompt |
 | `@ab_finished_at` | `orchestra set-state` | — | Epoch seconds of the last `done`, or of a `waiting` that interrupted `running` |
 | `@ab_status_<key>` | `orchestra set-status` | 40 chars | Arbitrary status pill value |
@@ -77,6 +80,7 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted,
 | `@orchestra_layout_before` / `@orchestra_layout_with` | orchestra-follow, orchestra-toggle | — | Window: its layout just before and just after the sidebar entered; restored with `select-layout` when the sidebar leaves if the layout is still the "with" one (`sidebar_layout_save` / `sidebar_layout_restore` in lib/common.sh) |
 | `@orchestra_bg_agents` | orchestra-bg-refresh | — | Global: background Claude sessions, `id;state;started_at;cwd;name` records joined by `\|`; unset when none |
 | `@orchestra_bg_id` | window opened by `select_bg_open` | — | Window: the background session id this window runs `claude attach` for |
+| `@orchestra_state_file` | user | — | Global: path of the session-id file (default `${XDG_STATE_HOME:-~/.local/state}/tmux-orchestra/sessions`) |
 | `@orchestra_background` | user | — | Global: `off` hides background sessions |
 | `@orchestra_bg_interval` | user / orchestra.tmux | — | Global: background refresh period in seconds (default 10, 0 disables); read when the renderer starts |
 
@@ -115,6 +119,7 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`, background: `◴◷◶◵`, compacting: `◜◝◞◟`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Stuck states: rejecting a permission prompt or pressing Esc ends a turn with no hook. The same background job first runs `orchestra-claude-hook reconcile`, which clears running/waiting on each Claude pane (its own options, or its window's when it has none) whose `~/.claude/sessions/<pid>.json` has had `status: "idle"` for at least 3 seconds (`statusUpdatedAt`).
 - Background sessions: `claude agents --json` starts a node process, so it never runs on the tick. `orchestra-render` starts `orchestra-bg-refresh` as a background job every `@orchestra_bg_interval` seconds (one at a time); it writes `@orchestra_bg_agents` only when the list changed and then sends SIGUSR1. The tick reads the option as a last `|bg|REC|...` line of the same tmux call. `render_frame` draws a one-line `── background ──` separator and one 3-line `bg_block` per session after the windows (after the one-line placeholder when there are none); `select_row` uses the same geometry, and `select_go` on a `bg:<id>` pick calls `select_bg_open`, which selects the window tagged `@orchestra_bg_id=<id>` or opens a new one running `claude attach <id>`.
+- Resumable panes: `ORCHESTRA_CLAUDE_PANE` is 1 for a Claude pane, 2 for a pane that runs none but has `@ab_resume_id`, else 0 (field 20 of the dump; `backfill` and `reconcile` act only on 1). `window_block` draws a 2 dim with `↺ resume` on the activity row and the last prompt (else the directory) below, with no glyph, age, unread dot or stale state. `select_windows` carries the id as a 4th field of `_sel_windows`; `select_go` on such a pick types `claude --resume <id>` into the pane (second tmux call) and unsets `@ab_resume_id`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
 ## Testing
@@ -145,7 +150,9 @@ Always go through `set_opt` / `clear_opt`. These enforce max-length truncation (
 Prompt hooks batch multiple `set-option` calls with `\;` into one `tmux` invocation to minimize shell-prompt overhead. Follow this pattern whenever writing multiple options from a time-sensitive path.
 
 ### No new persistent state outside tmux options
-Do not introduce temp files, FIFOs, sockets, or environment variables as a persistence mechanism. All cross-process communication goes through `@ab_*` options and SIGUSR1.
+tmux options are the live state store. Do not introduce temp files, FIFOs, sockets, or environment variables as a persistence mechanism; all cross-process communication goes through `@ab_*` options and SIGUSR1.
+
+The single exception is the session-id file, because a tmux crash takes every option with it. `bin/orchestra-resurrect save` (tmux-resurrect's `@resurrect-hook-post-save-all`, so also continuum's autosave) writes one line per Claude pane (`session<TAB>window<TAB>pane<TAB>session_id<TAB>cwd`); `restore` (`@resurrect-hook-post-restore-all`) reads it once and sets `@ab_resume_id` on the matching panes that run no Claude. Nothing else reads or writes the file: not the hook, not the renderer tick. `orchestra.tmux` installs both hooks (appending to hooks already set). Do not add other files.
 
 ### SIGUSR1 wakeup
 After writing state that should appear immediately in the sidebar (e.g., `notify`), send `kill -USR1 <renderer_pid>` where pid comes from `@orchestra_sidebar_pid`. The renderer may not be running (sidebar closed) — handle that case silently.

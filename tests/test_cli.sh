@@ -693,5 +693,68 @@ assert_eq 'pane wins' "$(tmux show-options -v -w -t "$window2_id" @ab_current_ac
 assert_eq '' "$(tmux show-options -v -w -t "$window_id" @ab_agent_state 2>/dev/null || printf '')" 'stale ORCHESTRA_WINDOW_ID is ignored when TMUX_PANE is present'
 orchestra clear-state --window "$window2_id"
 
+# Resume after a server restart: the hook records each pane's session id,
+# `orchestra-resurrect save` writes them (plus resumes still pending) to the
+# state file, and `restore` marks the matching panes that run no Claude as
+# resumable, which the pane format counts as 2.
+assert_contains() {
+    case "$1" in
+        *"$2"*) ;;
+        *) assert_eq "contains: $2" "$1" "$3" ;;
+    esac
+}
+state_file="$TMP_DIR/resurrect-sessions"
+tmux set-option -gq @orchestra_state_file "$state_file"
+assert_contains "$(tmux show-option -gqv @resurrect-hook-post-save-all)" 'orchestra-resurrect" save' 'loading the plugin hooks the resurrect save'
+assert_contains "$(tmux show-option -gqv @resurrect-hook-post-restore-all)" 'orchestra-resurrect" restore' 'loading the plugin hooks the resurrect restore'
+resume_window=$(tmux new-window -d -t orchestra-tests -P -F '#{window_id}')
+start_claude "$resume_window"
+resume_claude=$claude_pane
+pane_hook "$resume_claude" session-start '{"source":"startup","session_id":"aaaa-1111"}'
+assert_eq 'aaaa-1111' "$(popt "$resume_claude" @ab_session_id)" 'session-start records the session id'
+pane_hook "$resume_claude" prompt '{"prompt":"hello","session_id":"bbbb-2222"}'
+assert_eq 'bbbb-2222' "$(popt "$resume_claude" @ab_session_id)" 'a prompt records the session id'
+orchestra clear-state --pane "$resume_claude"
+assert_eq 'bbbb-2222' "$(popt "$resume_claude" @ab_session_id)" 'clear-state keeps the session id'
+orchestra-resurrect save
+resume_coords=$(tmux display-message -p -t "$resume_claude" '#{session_name}	#{window_index}	#{pane_index}	bbbb-2222	#{pane_current_path}')
+assert_contains "$(cat "$state_file")" "$resume_coords" 'save writes the pane, its session id and directory'
+assert_eq '1' "$(grep -c 'bbbb-2222' "$state_file")" 'save writes one line per Claude pane'
+
+# The server "restarts": the Claude pane comes back as a shell at the same
+# coordinates. Restore marks it resumable; a Claude pane and a pane at other
+# coordinates are left alone.
+tmux kill-pane -t "$resume_claude"
+resume_shell=$(tmux split-window -d -t "$resume_window" -P -F '#{pane_id}')
+assert_eq "$(printf '%s' "$resume_coords" | cut -f3)" "$(tmux display-message -p -t "$resume_shell" '#{pane_index}')" 'the restored shell takes the old pane index'
+orchestra-resurrect restore
+assert_eq 'bbbb-2222' "$(popt "$resume_shell" @ab_resume_id)" 'restore marks the shell pane resumable'
+assert_eq '2' "$(tmux display-message -p -t "$resume_shell" "$ORCHESTRA_CLAUDE_PANE")" 'a resumable pane counts as 2'
+assert_eq '' "$(popt "$resume_window.0" @ab_resume_id 2>/dev/null)" 'restore leaves other panes alone'
+
+# A save before the resume keeps the pending session.
+orchestra-resurrect save
+assert_eq '1' "$(grep -c 'bbbb-2222' "$state_file")" 'save keeps a pane whose resume is pending'
+
+# Starting Claude there (the sidebar types the command) ends the pending state.
+pane_hook "$resume_shell" session-start '{"source":"resume","session_id":"bbbb-2222"}'
+assert_eq '' "$(popt "$resume_shell" @ab_resume_id)" 'session-start clears the pending resume'
+
+# A different directory means the pane is not what was saved.
+tmux set-option -pu -t "$resume_shell" @ab_resume_id
+printf 'orchestra-tests\t%s\t%s\tcccc-3333\t/no/such/dir\n' \
+    "$(tmux display-message -p -t "$resume_shell" '#{window_index}')" \
+    "$(tmux display-message -p -t "$resume_shell" '#{pane_index}')" >"$state_file"
+orchestra-resurrect restore
+assert_eq '' "$(popt "$resume_shell" @ab_resume_id)" 'restore ignores a pane in another directory'
+# An id that is not a plain token is never marked.
+# shellcheck disable=SC2016 # Literal text for the state file.
+printf 'orchestra-tests\t%s\t%s\tx$(y)\t\n' \
+    "$(tmux display-message -p -t "$resume_shell" '#{window_index}')" \
+    "$(tmux display-message -p -t "$resume_shell" '#{pane_index}')" >"$state_file"
+orchestra-resurrect restore
+assert_eq '' "$(popt "$resume_shell" @ab_resume_id)" 'restore ignores an id that is not a plain token'
+tmux kill-window -t "$resume_window"
+
 # Clean up extra window.
 tmux kill-window -t "$window2_id"

@@ -7,7 +7,7 @@
 
 - **POSIX shell only.** No Rust, Go, Python, or Node. Every executable in this repo is a `#!/bin/sh` script that passes `shellcheck -s sh`.
 - **No external runtime deps** beyond tmux ≥ 3.2 and the platform notifier binary. Specifically: no `jq`, no `bash`-only features, no GNU-only flags (`sed -i` without arg, `grep -P`, `readlink -f`, etc.).
-- **tmux is the only state store.** No files under `$XDG_RUNTIME_DIR`, no SQLite, no sockets beyond tmux's own.
+- **tmux options are the live state store.** No files under `$XDG_RUNTIME_DIR`, no SQLite, no sockets beyond tmux's own. The one exception is the session-id file `bin/orchestra-resurrect` writes from tmux-resurrect's save hook and reads on restore, so Claude sessions can be resumed after a server crash; nothing is written to disk on the hook or render path.
 - **TPM-installable.** User clones the repo into `~/.tmux/plugins/tmux-orchestra`, adds one line to `.tmux.conf`, reloads — done.
 
 ## Repository layout
