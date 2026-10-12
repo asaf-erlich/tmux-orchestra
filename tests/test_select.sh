@@ -156,6 +156,14 @@ check_click 14 'confirm-before -t /dev/ttys001 -p pid 99999999 still runs this s
 check_click 14 'orchestra-orphan-resume o2 $1'
 check_click 16 'orchestra-orphan-resume o2 $1'
 check_click 17 ''
+# A completed background session (seventh field 1) resumes at once, even
+# with a pid field of 0: no kill prompt. In $HOME the new window is named
+# after the session.
+dump='$1|123|
+>100|/dev/ttys001
+|orphan|d1;0;1799000000;/tmp;job;0;1|d2;0;1799000100;'"$HOME"';my name;0;1'
+check_click 2 'new-window -t $1: -c /tmp -n tmp claude --resume d1; exec'
+check_click 5 "new-window -t \$1: -c $HOME -n my name claude --resume d2; exec"
 # An id that is not a plain token is never put in a command.
 dump='$1|123|
 >100|/dev/ttys001

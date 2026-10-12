@@ -22,7 +22,8 @@ with upstream, it:
 - lists **orphaned Claude Code sessions** (sessions in no tmux pane, such as
   ones left behind by a crashed tmux server) under an `orphaned` separator,
   titled by their directory, and resumes one in a matching or new window on
-  Enter or a click
+  Enter or a click; completed background sessions (`claude agents --all`)
+  are listed there too as `✓ done`, a way back in after a tmux crash
 - always puts the sidebar at the **left edge of the window, full height**,
   whichever pane is focused (not between side-by-side panes), and gives each
   window its pane sizes back when the sidebar leaves or closes
@@ -206,8 +207,13 @@ set -g @orchestra_background off   # or: set -g @orchestra_bg_interval 0
 Interactive Claude Code sessions that run in no tmux pane (the tmux server
 crashed, or the pane was closed with Claude still running, or Claude runs in a
 terminal outside tmux) are listed after the background sessions, below a
-`── orphaned ──` separator, newest first and at most 10. They come from the
-same `claude agents --json` call. A session counts as orphaned when its
+`── orphaned ──` separator, newest first and at most 10 (set
+`@orchestra_orphans_max` to change that). They come from the same
+`claude agents --json --all` call, which also lists **completed background
+sessions** (state done, failed or stopped): those show dim as `✓ done`, titled
+by their directory (by the session name when it ran in your home directory),
+unless a window is attached to them, a pane holds their id, or you dismissed
+them. Running background sessions stay in the background section. A session counts as orphaned when its
 process is not in any pane's process tree and no pane has its id (as
 `@ab_session_id`, or pending as `@ab_resume_id`, see "Restoring after a
 crash"). Each row is titled by the session's directory, with the directory
@@ -219,6 +225,8 @@ while the process still runs.
   session's directory or in a window named after it (with a `cd` first when it
   is elsewhere), else in a new window named after the directory, which keeps
   a shell when Claude exits.
+- A completed background session resumes the same way, with
+  `claude --resume <sessionId>`; nothing runs it, so there is no prompt.
 - A session whose process **still runs** asks first (`kill it and resume?`):
   two processes would write one session. Only on `y` is it sent SIGTERM, and
   only while the pid still is a Claude process; the resume starts once it has
@@ -230,6 +238,7 @@ It shares the refresh above (`@orchestra_bg_interval`). To turn it off:
 
 ```sh
 set -g @orchestra_orphans off
+set -g @orchestra_orphans_max 20   # rows shown, default 10
 ```
 
 ### OpenCode

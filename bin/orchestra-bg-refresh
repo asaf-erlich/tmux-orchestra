@@ -26,6 +26,16 @@
 # key) are left out, and ids `claude agents` no longer lists are dropped from
 # that option. Unset when there are none or @orchestra_orphans is off.
 #
+# Completed background sessions (`claude agents --json --all`: kind
+# "background", no status and a state of done, failed or stopped) are
+# orphans too, the way back into a session after a tmux crash: they get a
+# seventh field, "1" ("id;0;started_at;cwd;name;0;1"; resumed with
+# `claude --resume <sessionId>`, never alive). They are left out when a window
+# is attached to them, a pane holds their session id, or they are dismissed,
+# and never appear in @orchestra_bg_agents, which keeps only the running ones.
+# Interactive and completed sessions share one list, newest first, capped at
+# @orchestra_orphans_max (default 10).
+#
 # The renderer is nudged (SIGUSR1) only when a value changed. Always exits 0.
 
 renderer_pid=${1:-}
@@ -35,6 +45,7 @@ out=$(tmux display-message -p '#{@orchestra_background}' \; \
 	display-message -p '#{@orchestra_bg_agents}' \; \
 	display-message -p '#{@orchestra_orphan_agents}' \; \
 	display-message -p '#{@orchestra_orphan_dismissed}' \; \
+	display-message -p '#{@orchestra_orphans_max}' \; \
 	list-windows -a -F 'W|#{@orchestra_bg_id}' \; \
 	list-panes -a -F 'P|#{pane_pid}|#{@ab_session_id}|#{@ab_resume_id}' 2>/dev/null) || exit 0
 bg_enabled=$(printf '%s\n' "$out" | sed -n 1p)
@@ -42,6 +53,8 @@ orphan_enabled=$(printf '%s\n' "$out" | sed -n 2p)
 bg_current=$(printf '%s\n' "$out" | sed -n 3p)
 orphan_current=$(printf '%s\n' "$out" | sed -n 4p)
 dismissed=$(printf '%s\n' "$out" | sed -n 5p)
+max=$(printf '%s\n' "$out" | sed -n 6p)
+case "$max" in '' | *[!0-9]*) max=10 ;; esac
 attached=$(printf '%s\n' "$out" | sed -n 's/^W|//p' | tr '\n' ' ')
 pane_pids=$(printf '%s\n' "$out" | sed -n 's/^P|\([0-9]*\)|.*/\1/p' | tr '\n' ' ')
 known=$(printf '%s\n' "$out" | sed -n 's/^P|[0-9]*|\([^|]*\)|\(.*\)$/\1 \2/p' | tr '\n' ' ')
@@ -51,12 +64,16 @@ orphan_value=''
 new_dismissed=$dismissed
 if { [ "$bg_enabled" != 'off' ] || [ "$orphan_enabled" != 'off' ]; } &&
 	command -v claude >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-	json=$(claude agents --json 2>/dev/null) || exit 0
+	# A completed background session has no status and a final state.
+	# shellcheck disable=SC2016 # jq variables, not shell ones.
+	jq_defs='def completed: ((.status // "") == "") and ((.state // "") as $s | $s == "" or $s == "done" or $s == "failed" or $s == "stopped" or $s == "completed");'
+	json=$(claude agents --json --all 2>/dev/null) || exit 0
 	if [ "$bg_enabled" != 'off' ]; then
-		bg_value=$(printf '%s' "$json" | jq -r --arg attached "$attached" '
+		bg_value=$(printf '%s' "$json" | jq -r --arg attached "$attached" "$jq_defs"'
 			($attached | split(" ")) as $att
 			| [ .[]?
 				| select(.kind == "background" and (.id | type) == "string")
+				| select(completed | not)
 				| select(.id as $i | any($att[]; . == $i) | not)
 				| [.id, (.state // ""), (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
 				| map(tostring | gsub("[|;#\n\r]"; " "))
@@ -84,30 +101,40 @@ if { [ "$bg_enabled" != 'off' ] || [ "$orphan_enabled" != 'off' ]; } &&
 				}
 			}')
 		in_panes="$in_panes $pane_pids"
-		records=$(printf '%s' "$json" | jq -r --arg inpanes "$in_panes" --arg known "$known" --arg dismissed "$dismissed" '
+		records=$(printf '%s' "$json" | jq -r --arg inpanes "$in_panes" --arg known "$known" --arg dismissed "$dismissed" --arg attached "$attached" --argjson max "$max" "$jq_defs"'
+			($attached | split(" ")) as $att |
 			($inpanes | split(" ")) as $inp
 			| ($known | split(" ")) as $kn
 			| ($dismissed | split(" ")) as $dis
 			| [ .[]?
-				| select(.kind == "interactive" and (.sessionId | type) == "string" and (.pid | type) == "number")
-				| select(.pid as $p | any($inp[]; . == ($p | tostring)) | not)
+				| select((.sessionId | type) == "string")
+				| select(
+					(.kind == "interactive" and (.pid | type) == "number"
+						and (.pid as $p | any($inp[]; . == ($p | tostring)) | not))
+					or (.kind == "background" and completed
+						and ((.id // "") as $i | any($att[]; . == $i) | not)))
 				| select(.sessionId as $s | any($kn[]; . == $s) | not)
 				| select(.sessionId as $s | any($dis[]; . == $s) | not) ]
-			| sort_by(-(.startedAt // 0)) | .[:10][]
-			| [.sessionId, .pid, (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // "")]
+			| sort_by(-(.startedAt // 0)) | .[:$max][]
+			| [.sessionId, (if .kind == "interactive" then .pid else 0 end), (((.startedAt // 0) / 1000) | floor), (.cwd // ""), (.name // ""), (if .kind == "interactive" then 0 else 1 end)]
 			| map(tostring | gsub("[|;#\n\r]"; " "))
 			| join(";")' 2>/dev/null) || exit 0
 		# Ids still listed, to forget dismissals of sessions that are gone.
-		listed=$(printf '%s' "$json" | jq -r '[ .[]? | select(.kind == "interactive") | .sessionId? // empty ] | join(" ")' 2>/dev/null) || listed=''
+		listed=$(printf '%s' "$json" | jq -r '[ .[]? | .sessionId? // empty ] | join(" ")' 2>/dev/null) || listed=''
 		new_dismissed=''
 		for id in $dismissed; do
 			case " $listed " in *" $id "*) new_dismissed="${new_dismissed:+$new_dismissed }$id" ;; esac
 		done
-		while IFS=';' read -r id pid rest; do
+		while IFS=';' read -r id pid started cwd name isdone; do
 			[ -n "$id" ] || continue
-			alive=0
-			kill -0 "$pid" 2>/dev/null && alive=1
-			orphan_value="${orphan_value:+$orphan_value|}$id;$pid;$rest;$alive"
+			if [ "$isdone" = 1 ]; then
+				rec="$id;0;$started;$cwd;$name;0;1"
+			else
+				alive=0
+				kill -0 "$pid" 2>/dev/null && alive=1
+				rec="$id;$pid;$started;$cwd;$name;$alive"
+			fi
+			orphan_value="${orphan_value:+$orphan_value|}$rec"
 		done <<EOT
 $records
 EOT

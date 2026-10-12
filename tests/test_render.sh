@@ -160,13 +160,13 @@ check_background() {
 check_background
 
 # Orphaned sessions (`claude agents` interactive sessions no pane runs,
-# "|orphan|REC|..." with "id;pid;started_at;cwd;name;alive"): a separator and
+# "|orphan|REC|..." with "id;pid;started_at;cwd;name;alive[;done]"): a separator and
 # one block per record after the background sessions, titled by the
 # directory name, newest first as given; a live one says so on its activity
 # row. The keyboard selection can point at one ("orphan:<id>"). An empty
 # "|orphan|" line draws nothing.
 check_orphans() {
-    actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-orphans.input")
+    actual=$(HOME=/Users/me NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-orphans.input")
     expected_text=$(cat "$REPO_DIR/tests/fixtures/render-orphans.expected")
     if [ "$actual" != "$expected_text" ]; then
         printf 'render_frame orphans mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2

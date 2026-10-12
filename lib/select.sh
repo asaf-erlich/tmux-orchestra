@@ -48,7 +48,8 @@ ORCHESTRA_PANE_RANK='#{?window_active,#{?pane_active,1,#{?pane_last,2,3}},0}'
 #   _sel_nbg, _sel_norph  the numbers of background and orphaned sessions
 #   _sel_bg             @orchestra_bg_agents ("id;state;started;cwd;name|...")
 #   _sel_orphan         @orchestra_orphan_agents
-#                       ("id;pid;started;cwd;name;alive|...")
+#                       ("id;pid;started;cwd;name;alive[;done]|..."; done is 1
+#                       for a completed background session)
 #   _sel_dismissed      @orchestra_orphan_dismissed (ids, space separated)
 #   _sel_stored         @orchestra_selected_window
 #   _sel_view_session   the viewing session's id
@@ -329,8 +330,9 @@ EOF
 }
 
 # Usage: select_orphan_find ID
-# Looks ID up in _sel_orphan and sets _sel_o_pid, _sel_o_cwd and _sel_o_alive
-# ("id;pid;started;cwd;name;alive" records). Returns 1 when ID is not listed
+# Looks ID up in _sel_orphan and sets _sel_o_pid, _sel_o_cwd, _sel_o_name,
+# _sel_o_alive and _sel_o_done ("id;pid;started;cwd;name;alive[;done]"
+# records; the done field is empty in older records). Returns 1 when ID is not listed
 # or is not a plain token.
 select_orphan_find() {
 	case "$1" in '' | *[!0-9A-Za-z_-]*) return 1 ;; esac
@@ -348,14 +350,20 @@ select_orphan_find() {
 		_sel_rec=${_sel_rec#*;}
 		_sel_rec=${_sel_rec#*;}
 		_sel_o_cwd=${_sel_rec%%;*}
-		_sel_o_alive=${_sel_rec##*;}
+		_sel_rec=${_sel_rec#*;}
+		_sel_o_name=${_sel_rec%%;*}
+		_sel_rec=${_sel_rec#*;}
+		_sel_o_alive=${_sel_rec%%;*}
+		_sel_o_done=''
+		case "$_sel_rec" in *';'*) _sel_o_done=${_sel_rec#*;} ;; esac
 		return 0
 	done
 	return 1
 }
 
 # Usage: select_orphan_open ID
-# Enter or a click on an orphaned session. One that no process runs resumes
+# Enter or a click on an orphaned session. One that no process runs (a
+# completed background session included) resumes
 # at once (select_orphan_resume). One whose process still runs (alive: in
 # another terminal, or left behind) asks first, on the viewing client, and
 # only then kills it and resumes, so two processes never write one session:
@@ -390,6 +398,9 @@ select_orphan_resume() {
 	case "$_sel_cwd" in *"'"*) _sel_cwd=$HOME ;; esac
 	_sel_base=${_sel_cwd%/}
 	_sel_base=${_sel_base##*/}
+	# A completed background session that ran in $HOME is named, not the
+	# directory (as lib/render.sh titles it).
+	[ "$_sel_o_done" != 1 ] || [ "$_sel_cwd" != "$HOME" ] || [ -z "$_sel_o_name" ] || _sel_base=$_sel_o_name
 	[ -n "$_sel_base" ] || _sel_base=$1
 
 	_sel_target=''

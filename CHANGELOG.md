@@ -31,6 +31,16 @@ All of them are on the `fix-pane-exists` branch.
   (`bin/orchestra-orphan-resume`). `x` dismisses a row
   (`@orchestra_orphan_dismissed`); `@orchestra_orphans off` hides the section.
 
+- **Completed background sessions in the orphaned section.** The refresh now
+  calls `claude agents --json --all` (still one call, off the tick) and lists
+  completed background sessions (no status; state done, failed or stopped) as
+  orphans too, so sessions from before a tmux crash are one Enter away. They
+  show dim with `✓ done`, titled by directory (by session name when it ran in
+  `$HOME`), and resume with `claude --resume <sessionId>` like other orphans,
+  without the kill prompt. Sessions a window is attached to, a pane holds, or
+  you dismissed are left out. The list is newest first, capped by the new
+  `@orchestra_orphans_max` (default 10).
+
 ### Changed
 
 - **The sidebar always sits at the left edge of its window, full height.**

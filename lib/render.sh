@@ -342,21 +342,26 @@ function orphan_separator(width) {
 
 # One orphaned session (`claude agents` kind "interactive" that no tmux pane
 # runs, recorded by bin/orchestra-bg-refresh in @orchestra_orphan_agents) as a
-# window_block. rec is "id;pid;started_at;cwd;name;alive". The block id is
+# window_block. rec is "id;pid;started_at;cwd;name;alive[;done]". The block id is
 # "orphan:<id>", which is also how the keyboard selection names it. The title
 # is the directory name; the activity row says "↺ resume", or "● pid N live
-# elsewhere" while the process still runs, and the meta row is the directory.
+# elsewhere" while the process still runs, "✓ done" for a completed background
+# session (seventh field 1, titled by its name when it ran in $HOME), and the
+# meta row is the directory.
 function orphan_block(rec, width, frame, nerd, wait_color, selected,    r, g, base) {
 	split(rec, r, ";")
 	for (g = 1; g <= 27; g++) g_f[g] = ""
 	base = r[4]
 	sub(/\/+$/, "", base)
 	sub(/.*\//, "", base)
+	# A completed background session (r[7] == 1) started in $HOME is told
+	# apart by its name, not the directory.
+	if (r[7] == "1" && ENVIRON["HOME"] != "" && r[4] == ENVIRON["HOME"] && r[5] != "") base = r[5]
 	if (base == "") base = (r[5] != "") ? r[5] : r[1]
 	g_f[2] = "orphan:" r[1]
 	g_f[3] = base
 	g_f[4] = "0"
-	g_f[6] = (r[6] == "1") ? "● pid " r[2] " live elsewhere" : "↺ resume"
+	g_f[6] = (r[7] == "1") ? "✓ done" : (r[6] == "1") ? "● pid " r[2] " live elsewhere" : "↺ resume"
 	g_f[8] = r[4]
 	g_f[20] = "3"
 	g_f[22] = r[3]
