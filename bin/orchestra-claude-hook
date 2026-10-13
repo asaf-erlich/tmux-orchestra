@@ -33,7 +33,9 @@
 #                  background refresh. Clears running/waiting on each Claude
 #                  pane whose own session reports idle: rejecting a
 #                  permission prompt or pressing Esc ends the turn with no
-#                  hook at all.
+#                  hook at all. Also ends "background" on an idle session
+#                  once the transcript shows every task Stop counted (its
+#                  ids are in @ab_bg_tasks) finished.
 #   backfill       Not a hook. Fill prompt, finish time and empty-session
 #                  marker for Claude panes already running, from
 #                  ~/.claude/sessions/<pid>.json and the session transcript.
@@ -88,6 +90,7 @@ event_prompt() {
         *) orchestra set-prompt "$prompt" "$scope" "$target" ;;
     esac
     clear_opt "$target" '@ab_session_source'
+    clear_opt "$target" '@ab_bg_tasks'
     orchestra set-state running --spinner claude --action thinking "$scope" "$target"
 }
 
@@ -155,16 +158,26 @@ event_notification() {
 # reports one as "running" for its whole life, including while it sits
 # idle waiting to be messaged, and a teammate that does message back starts
 # a new turn anyway (UserPromptSubmit marks running again).
+# shellcheck disable=SC2016 # jq program, not shell.
+RUNNING_TASKS='[.background_tasks[]? | select(.type != "teammate")
+    | select((.status // "running") as $s
+    | ["completed", "failed", "killed", "cancelled", "canceled", "stopped", "done", "error", "idle"]
+    | index($s) | not)]'
+
 # Prints "N background: <first description>" or nothing.
 background_summary() {
     # shellcheck disable=SC2016 # jq program, not shell.
-    field '[.background_tasks[]? | select(.type != "teammate")
-        | select((.status // "running") as $s
-        | ["completed", "failed", "killed", "cancelled", "canceled", "stopped", "done", "error", "idle"]
-        | index($s) | not)]
+    field "$RUNNING_TASKS"'
         | if length == 0 then empty
           else "\(length) background: \(.[0].description // .[0].command // .[0].type // "task")"
           end | gsub("\\s+"; " ")'
+}
+
+# The ids of those tasks, space-separated. Stop is the only hook that lists
+# them, so it records them (@ab_bg_tasks) for reconcile to check later.
+background_task_ids() {
+    field "$RUNNING_TASKS"' | map(.id // .task_id // empty | tostring) | join(" ")' |
+        tr -cd 'A-Za-z0-9_ -'
 }
 
 event_stop() {
@@ -173,8 +186,10 @@ event_stop() {
     pending=$(background_summary)
     if [ -n "$pending" ]; then
         orchestra set-state background --spinner claude --action "$pending" "$scope" "$target"
+        set_opt "$target" '@ab_bg_tasks' "$(background_task_ids)"
         return 0
     fi
+    clear_opt "$target" '@ab_bg_tasks'
     orchestra set-state 'done' "$scope" "$target"
     orchestra clear-state "$scope" "$target"
     # Unread means "finished while you were elsewhere": skip it for the
@@ -288,15 +303,51 @@ backfill() {
     done
 }
 
+# Usage: reconcile_background PANE WINDOW SESSION_FILE
+# An idle session in the background state: Stop recorded the tasks it saw
+# running (@ab_bg_tasks). Claude Code starts a new turn (and so a new Stop)
+# when one finishes, but a task that finished during the Stop turn itself, or
+# was killed, never does, and the pane would show background for good. When
+# the transcript holds a finished <task-notification> for every recorded
+# task, the work is over: end as Stop does for a finished turn.
+reconcile_background() {
+    if [ -n "$(get_opt "$1" '@ab_agent_state')" ]; then
+        target=$1
+        scope=--pane
+    else
+        target=$2
+        scope=--window
+    fi
+    ids=$(get_opt "$target" '@ab_bg_tasks')
+    [ -n "$ids" ] || return 0
+    sid=$(jq -r '.sessionId // empty' "$3" 2>/dev/null)
+    [ -n "$sid" ] || return 0
+    transcript=$(find "$CLAUDE_DIR/projects" -maxdepth 2 -name "$sid.jsonl" 2>/dev/null | head -n 1)
+    [ -n "$transcript" ] || return 0
+    for id in $ids; do
+        # The task's latest notification decides (an agent can be resumed).
+        last=$(grep -F "<task-id>$id</task-id>" "$transcript" 2>/dev/null | tail -n 1)
+        case "$last" in
+            *'<status>completed</status>'*|*'<status>failed</status>'*|*'<status>killed</status>'*|*'<status>stopped</status>'*) ;;
+            *) return 0 ;;
+        esac
+    done
+    clear_opt "$target" '@ab_bg_tasks'
+    orchestra set-state 'done' "$scope" "$target"
+    orchestra clear-state "$scope" "$target"
+    looking || orchestra notify --quiet --title 'Claude Code' --body 'finished' "$scope" "$target"
+}
+
 # Usage: reconcile_pane PANE WINDOW STATE SESSION_FILE
 # STATE is the pane's own state, or its window's when it has none.
 reconcile_pane() {
-    case "$3" in running|waiting) ;; *) return 0 ;; esac
+    case "$3" in running|waiting|background) ;; *) return 0 ;; esac
     idle_since=$(jq -r 'select(.status == "idle") | .statusUpdatedAt // empty' "$4" 2>/dev/null)
     case "$idle_since" in
         ''|*[!0-9]*) return 0 ;;
     esac
     [ $((now_ms - idle_since)) -ge 3000 ] || return 0
+    [ "$3" != background ] || { reconcile_background "$1" "$2" "$4"; return 0; }
     if [ -n "$(get_opt "$1" '@ab_agent_state')" ]; then
         orchestra clear-state --pane "$1"
         clear_opt "$1" '@ab_unread'

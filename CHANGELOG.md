@@ -43,6 +43,18 @@ All of them are on the `fix-pane-exists` branch.
   its first line and then stores its own pid in `@orchestra_sidebar_pid`;
   `orchestra-toggle` no longer stores one, so no hook signals the pane
   before it can survive the signal.
+
+- **A pane no longer stays in "background" after its background work
+  finished.** The Stop hook is the only hook that lists background tasks, so
+  a task that finished during that turn's own wrap-up, or was killed, left
+  the pane at `N background: ...` until the next prompt: no further turn
+  meant no further Stop, and the periodic `reconcile` only cleared
+  running/waiting. Stop now records the ids of the tasks it counted
+  (`@ab_bg_tasks`), and `reconcile` ends a `background` pane whose session
+  has been idle for 3 seconds once the transcript holds a finished
+  `<task-notification>` for every one of them (done, with the unread dot
+  unless you are looking). Limit: a task id with no recorded notification
+  (a Stop payload without ids) is left alone.
 - **A daemon-hosted Claude session no longer shows on the other panes of its
   window.** Hooks of a session the Claude daemon hosts (`claude --bg`, then
   `claude attach`) get no `$TMUX_PANE`, so they write window-scoped options,

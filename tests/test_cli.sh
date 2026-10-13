@@ -353,6 +353,51 @@ orchestra set-state background --action '1 background: x' --window "$window_id"
 reconcile
 assert_eq 'background' "$(opt @ab_agent_state)" 'reconcile leaves the background state alone'
 orchestra clear-state --window "$window_id"
+# Background work that finished without a further turn (so no Stop hook):
+# Stop records the running task ids, and reconcile ends the state once the
+# transcript has a finished notification for each of them.
+mkdir -p "$TMP_DIR/claude/projects/proj"
+bg_transcript="$TMP_DIR/claude/projects/proj/sess-bg.jsonl"
+printf '{"type":"user"}\n' >"$bg_transcript"
+bg_hook() {
+    printf '%s' "$2" | TMUX_PANE="$window1_claude_pane" orchestra-claude-hook "$1"
+}
+bg_opt() {
+    tmux show-options -v -p -t "$window1_claude_pane" "$1" 2>/dev/null || printf ''
+}
+bg_session() {
+    printf '{"sessionId":"sess-bg","status":"%s","statusUpdatedAt":%s}\n' "$1" "$2" >"$TMP_DIR/claude/sessions/$claude_pid.json"
+}
+bg_note() {
+    printf '{"type":"queue-operation","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n</task-notification>"}\n' "$1" "$2" >>"$bg_transcript"
+}
+bg_hook stop '{"background_tasks":[{"id":"bgA","type":"local_bash","status":"running","description":"py"},{"id":"bgB","type":"local_agent","status":"running","description":"agent"},{"id":"t9","type":"teammate","status":"running"}]}'
+assert_eq 'bgA bgB' "$(bg_opt @ab_bg_tasks)" 'stop records the running background task ids'
+bg_session idle $((now_ms - 60000))
+reconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'reconcile keeps background while no task has finished'
+bg_note bgA completed
+reconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'reconcile keeps background while one task is still running'
+bg_session busy $((now_ms - 60000))
+bg_note bgB completed
+reconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'reconcile leaves a busy session in background'
+bg_session idle $(($(date +%s) * 1000))
+reconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'reconcile waits before trusting a fresh idle for background'
+bg_session idle $((now_ms - 60000))
+reconcile
+assert_eq '' "$(bg_opt @ab_agent_state)" 'reconcile ends background once every recorded task has finished'
+assert_eq '' "$(bg_opt @ab_bg_tasks)" 'finishing background work forgets the task ids'
+assert_eq '1' "$(bg_opt @ab_unread)" 'finished background work marks an unwatched window unread'
+tmux set-option -pq -t "$window1_claude_pane" @ab_unread ''
+bg_hook stop '{"background_tasks":[{"id":"bgC","type":"local_bash","status":"running","description":"py"}]}'
+bg_hook prompt '{"prompt":"<task-notification> <task-id>bgC</task-id>"}'
+assert_eq '' "$(bg_opt @ab_bg_tasks)" 'a new turn forgets the recorded task ids'
+bg_hook stop '{}'
+orchestra clear-state --pane "$window1_claude_pane"
+tmux set-option -pq -t "$window1_claude_pane" @ab_unread ''
 rm -f "$TMP_DIR/claude/sessions/$claude_pid.json"
 
 # Two Claude panes in one window: the hook writes to $TMUX_PANE, so each
