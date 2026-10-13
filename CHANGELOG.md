@@ -33,6 +33,16 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Fixed
 
+- **An early SIGUSR1 no longer kills a new sidebar renderer.**
+  `orchestra-toggle` stored the pane's pid right after `split-window`, when
+  it is still the pane's shell (and later the renderer while it sourced its
+  libraries), and a hook (`window-renamed`, fired when the pane's command
+  changes) could signal it before `orchestra-render` had a `USR1` trap, so
+  the default action killed the sidebar (about one run in four of the
+  "follow moves the sidebar" test). `orchestra-render` now traps `USR1` on
+  its first line and then stores its own pid in `@orchestra_sidebar_pid`;
+  `orchestra-toggle` no longer stores one, so no hook signals the pane
+  before it can survive the signal.
 - **A daemon-hosted Claude session no longer shows on the other panes of its
   window.** Hooks of a session the Claude daemon hosts (`claude --bg`, then
   `claude attach`) get no `$TMUX_PANE`, so they write window-scoped options,

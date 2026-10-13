@@ -30,13 +30,15 @@ case "$width" in
 esac
 
 layout_before=$(tmux display-message -p -t "$current_window" '#{window_layout}' 2>/dev/null || true)
-pane_info=$(tmux split-window -bfhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}|#{pane_pid}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
-new_pane=${pane_info%%|*}
-new_pid=${pane_info#*|}
+# No pid is stored here: until the renderer execs, the pane's process is the
+# user's shell, which a hook's SIGUSR1 would kill. orchestra-render stores its
+# own pid once it traps the signal. Drop any stale one first.
+tmux set-option -gqu @orchestra_sidebar_pid >/dev/null 2>&1 || true
+pane_info=$(tmux split-window -bfhd -l "$width" -t "$current_window" -c "$PWD" -P -F '#{pane_id}' "exec \"$plugin_dir/bin/orchestra-render\"") || ab_tmux_fail 'failed to open sidebar'
+new_pane=$pane_info
 
 tmux set-option -pt "$new_pane" pane-border-status off >/dev/null 2>&1 || true
 sidebar_layout_save "$current_window" "$layout_before"
 
 tmux set-option -gq @orchestra_sidebar_pane_id "$new_pane" \; \
-    set-option -gq @orchestra_sidebar_pid "$new_pid" \; \
     set-option -gq @orchestra_sidebar_width "$width" >/dev/null 2>&1 || ab_tmux_fail 'failed to store sidebar options'

@@ -1,4 +1,16 @@
 #!/bin/sh
+# Trap SIGUSR1 before anything slow, then publish the pid. Hooks
+# (window-renamed fires when the new pane's command changes) signal
+# @orchestra_sidebar_pid, and with the default action a signal that lands while
+# this script is still sourcing lib/*.sh kills the renderer. orchestra-toggle
+# deliberately does not store a pid: the pane's process is the user's shell
+# for its whole startup, which has no trap. The renderer publishes its own pid
+# here, once it can survive the signal. A signal that arrives while redraw is
+# running would otherwise be absorbed and the next full sleep would delay the
+# update, so remember it in $nudged.
+nudged=0
+trap 'nudged=1' USR1
+tmux set-option -gq @orchestra_sidebar_pid "$$" >/dev/null 2>&1 || :
 set -eu
 
 ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
@@ -10,12 +22,6 @@ ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
 # Process creation can be very slow (endpoint security scans every exec), so
 # a tick costs exactly one tmux call and one awk, and a keypress burst two
 # tmux calls in the reader plus the redraw it triggers.
-
-# The reader sends SIGUSR1 after a key and hooks send it after state
-# changes. A signal that arrives while redraw is running would otherwise be
-# absorbed and the next full sleep would delay the update, so remember it.
-nudged=0
-trap 'nudged=1' USR1
 
 sleep_interruptible() {
     [ "$nudged" = 0 ] || return 0
