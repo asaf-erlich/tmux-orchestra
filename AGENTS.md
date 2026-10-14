@@ -36,6 +36,7 @@ tests/
   test_render.sh        Fixture-based render regression tests
   test_select.sh        Click/selection mapping against a stub tmux function
   test_orphans_e2e.sh   Orphaned-session list end to end (stub claude, real sidebar, private tmux server)
+  test_bgalive_e2e.sh   Background health check end to end (real ps and processes, real sidebar, private tmux server)
   fixtures/             Pipe-delimited input + .expected output pairs
 spec/
   implementation-spec.md  Authoritative design reference
@@ -134,13 +135,15 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 ## Testing
 
 ```sh
-make test          # shellcheck + test_cli.sh + test_render.sh + test_select.sh + test_orphans_e2e.sh
+make test          # shellcheck + test_cli.sh + test_render.sh + test_select.sh + test_orphans_e2e.sh + test_bgalive_e2e.sh
 make shellcheck    # shellcheck only
 make e2e           # tests/test_orphans_e2e.sh alone (about 20 s; needs jq and script(1))
+make e2e-bg        # tests/test_bgalive_e2e.sh alone (about 40 s; needs jq and script(1))
 ```
 
 - `tests/test_cli.sh` spins up a detached tmux server on a private socket (`-L <socket>`), exercises every CLI subcommand, and asserts option values are written correctly. Always clean up the server with `tmux -L <socket> kill-server` at the end.
 - `tests/test_orphans_e2e.sh` runs the real sidebar and refresh job on a private tmux server against a stub `claude` (canned `agents --json --all`, `--resume` argv recorded), drives keys/clicks/`confirm-before`, and asserts the frame and what gets resumed. Run it with stdin from `/dev/null` and never under `timeout` (the headless client would be stopped on the tty).
+- `tests/test_bgalive_e2e.sh` runs `orchestra-claude-hook reconcile` against real processes, with no stub `ps` (a counting pass-through): fake Claudes are copies of dash named `claude` in panes of a private tmux server, with session files and transcripts in a private `$HOME`, Stop payloads piped through the real hook, and one real `sh -c 'sleep 600'` child. It covers alive (child, fresh output file), stopped (ends after `ORCHESTRA_BG_GRACE`, unread unless focused), unknown (`background?`, never ends), one `ps` per pass, and the sidebar frame and colours, with the grace shortened to 6 s. Same rules as above: stdin from `/dev/null`, never under `timeout`.
 - `tests/test_render.sh` sources [lib/render.sh](lib/render.sh), feeds fixture data, and diffs stdout against [tests/fixtures/](tests/fixtures/) `.expected` files.
 - **When adding a feature, add a corresponding test.** For rendering changes, add or update `.expected` fixture files.
 
