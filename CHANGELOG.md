@@ -49,13 +49,18 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Changed
 
-- **A pane left in `background` for 10 minutes or more is marked as
-  unconfirmed.** Its row reads `3 background? idle 25m · <first task>` in
-  grey instead of `3 background: <first task>`. The hook ends a background
-  pane only when every recorded task sent a finished notification; a watcher
-  or monitor (for instance an artifact's "live updates" task) never does, so
-  such a pane used to look the same as one with real work in flight. The idle
-  time is the age already kept in `@ab_finished_at`; no new field.
+- **A `background` pane's work is now health-checked.** Besides the
+  finished-notification check, `orchestra-claude-hook reconcile` (one `ps` for
+  all panes) looks for work still running: a shell command under the Claude
+  process (background shells, an agent's tool calls), a process naming a
+  task's output file, or an output file written in the last 2 minutes. While
+  any is seen the row stays `N background: <cmd>` however long it runs
+  (`@ab_bg_alive_at` records when). When every task is known to have stopped
+  (output file, nothing running) and nothing was seen working for 10 minutes,
+  the pane ends as a finished turn does. A task that leaves neither process
+  nor file (an in-process watcher such as an artifact's "live updates") cannot
+  be told from running: the pane stays background and reads
+  `N background? idle 25m · <cmd>` in grey, so `?` means "unknown".
 
 - **The sidebar always sits at the left edge of its window, full height.**
   It used to open and follow to the left of the focused pane, so with two

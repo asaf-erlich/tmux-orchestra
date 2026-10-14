@@ -135,10 +135,10 @@ check_resumable() {
 }
 check_resumable
 
-# A pane in the background state for 10 minutes or more (field 21, finished_at,
-# is when Stop left it there) reads "N background? idle 25m · ..." in grey:
-# nothing confirmed its work finished, so it may be a watcher that never ends.
-# Under 10 minutes, or text that is not "N background: ...", is unchanged.
+# "N background? cmd" (written by the reconcile health check when it cannot
+# tell whether the work runs) reads "N background? idle 25m · cmd" in grey,
+# the age from field 21 (finished_at). "N background: cmd" stays plain
+# however old it is: work seen running is not marked.
 check_background_stale() {
     actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-background-stale.input")
     expected_text=$(cat "$REPO_DIR/tests/fixtures/render-background-stale.expected")

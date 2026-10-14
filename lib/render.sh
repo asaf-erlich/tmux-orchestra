@@ -243,11 +243,12 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	idle = !live_state(state)
 	empty = (idle && !resumable && f[27] == "" && f[23] != "")
 	activity = orphan ? f[6] : resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
-	# A pane left in background for a while with nothing confirming its work
-	# finished (the hook ends it on a finished notification, which a watcher or
-	# monitor never sends) reads "N background? idle 25m: ..." in grey.
-	bg_stale = (state == "background" && f[21] ~ /^[0-9]+$/ && now ~ /^[0-9]+$/ && now - f[21] >= BG_STALE_SECONDS)
-	if (bg_stale && activity ~ /^[0-9]+ background: /) activity = substr(activity, 1, index(activity, " background: ") + 10) "? idle " age_text(f[21]) " · " substr(activity, index(activity, " background: ") + 13)
+	# The health check (orchestra-claude-hook reconcile) writes "N background?
+	# cmd" when it cannot tell whether the work still runs (an in-process
+	# watcher leaves no process or file): drawn grey with the idle time,
+	# "N background? idle 25m · cmd". Work seen running stays "N background: cmd".
+	bg_stale = (state == "background" && activity ~ /^[0-9]+ background\? /)
+	if (bg_stale && age_text(f[21]) != "") activity = substr(activity, 1, index(activity, "? ")) " idle " age_text(f[21]) " · " substr(activity, index(activity, "? ") + 2)
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
@@ -439,7 +440,7 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 # VIEW_SESSION keeps field 4 as is.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
-BEGIN { FS = "|"; set_state_colors(); active_rank = 9; BG_STALE_SECONDS = 600 }
+BEGIN { FS = "|"; set_state_colors(); active_rank = 9 }
 mode == "frame" && NR == 1 {
 	width = $1; nerd = $2; wait_color = $3; view = $4; now = $5
 	bg_color = $6; compact_color = $7; error_color = $8; done_color = $9
