@@ -49,6 +49,14 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Changed
 
+- **A pane left in `background` for 10 minutes or more is marked as
+  unconfirmed.** Its row reads `3 background? idle 25m · <first task>` in
+  grey instead of `3 background: <first task>`. The hook ends a background
+  pane only when every recorded task sent a finished notification; a watcher
+  or monitor (for instance an artifact's "live updates" task) never does, so
+  such a pane used to look the same as one with real work in flight. The idle
+  time is the age already kept in `@ab_finished_at`; no new field.
+
 - **The sidebar always sits at the left edge of its window, full height.**
   It used to open and follow to the left of the focused pane, so with two
   panes side by side it ended up between them whenever the right one was

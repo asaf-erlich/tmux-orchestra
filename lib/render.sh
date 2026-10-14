@@ -221,7 +221,7 @@ function with_style(style, c, text,    s) {
 # glyph, no age and none of its (stale) agent state. f[20] is 3 for an
 # orphaned session (orphan_block): drawn like a resumable pane, but f[6] is its
 # activity row and its age, from f[22], is shown.
-function window_block(f, width, frame, nerd, wait_color, selected,    orphan, resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
+function window_block(f, width, frame, nerd, wait_color, selected,    orphan, resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done, bg_stale) {
 	orphan = (f[20] == "3")
 	resumable = (f[20] == "2" || orphan)
 	active = f[4]; state = resumable ? "" : f[5]
@@ -243,6 +243,11 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	idle = !live_state(state)
 	empty = (idle && !resumable && f[27] == "" && f[23] != "")
 	activity = orphan ? f[6] : resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
+	# A pane left in background for a while with nothing confirming its work
+	# finished (the hook ends it on a finished notification, which a watcher or
+	# monitor never sends) reads "N background? idle 25m: ..." in grey.
+	bg_stale = (state == "background" && f[21] ~ /^[0-9]+$/ && now ~ /^[0-9]+$/ && now - f[21] >= BG_STALE_SECONDS)
+	if (bg_stale && activity ~ /^[0-9]+ background: /) activity = substr(activity, 1, index(activity, " background: ") + 10) "? idle " age_text(f[21]) " · " substr(activity, index(activity, " background: ") + 13)
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
@@ -294,8 +299,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	if (active == "1" && needs_you) title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
 	else if (needs_you) title_style = "color"
-	row_style = ((live_state(state) && state != "running") || empty || unread_done || resumable) ? "color" : ""
-	row_color = (empty || resumable) ? "#808080" : scolor
+	row_style = ((live_state(state) && state != "running") || bg_stale || empty || unread_done || resumable) ? "color" : ""
+	row_color = (empty || resumable || bg_stale) ? "#808080" : scolor
 
 	# Unread: a red dot replaces the second-to-last character of the top
 	# border, unless the title fills the row (the meta row still shows the
@@ -434,7 +439,7 @@ function bg_block(rec, width, frame, nerd, wait_color, selected,    r, g, st, id
 # VIEW_SESSION keeps field 4 as is.
 # shellcheck disable=SC2016 # awk program, not shell.
 _RENDER_AWK_MAIN='
-BEGIN { FS = "|"; set_state_colors(); active_rank = 9 }
+BEGIN { FS = "|"; set_state_colors(); active_rank = 9; BG_STALE_SECONDS = 600 }
 mode == "frame" && NR == 1 {
 	width = $1; nerd = $2; wait_color = $3; view = $4; now = $5
 	bg_color = $6; compact_color = $7; error_color = $8; done_color = $9

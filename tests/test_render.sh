@@ -135,6 +135,20 @@ check_resumable() {
 }
 check_resumable
 
+# A pane in the background state for 10 minutes or more (field 21, finished_at,
+# is when Stop left it there) reads "N background? idle 25m · ..." in grey:
+# nothing confirmed its work finished, so it may be a watcher that never ends.
+# Under 10 minutes, or text that is not "N background: ...", is unchanged.
+check_background_stale() {
+    actual=$(NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-background-stale.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-background-stale.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render stale background mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+}
+check_background_stale
+
 # Background sessions (@orchestra_bg_agents, the "|bg|..." line): a separator
 # after the windows, then one 3-line block each, named after the session,
 # with the daemon state mapped onto running/waiting/done and an unknown one
