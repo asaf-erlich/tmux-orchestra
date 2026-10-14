@@ -21,3 +21,9 @@
 ┌─ debug iterm crash ────────────── 2d ─
 │ ✓ done
 │ me
+┌─ twin ─────────────────────────── 3d ─
+│ ✓ done
+│ twin · first twin
+┌─ twin ─────────────────────────── 4d ─
+│ ✓ done
+│ twin · second twin

@@ -81,6 +81,10 @@ All of them are on the `fix-pane-exists` branch.
   unless you are looking). Limit: a task id with no recorded notification
   (a Stop payload without ids) is left alone.
 
+- **Orphaned sessions with the same title can be told apart.** When two rows
+  of the orphaned section would carry the same title (the same directory), the
+  meta row now shows the session name after the directory
+  (`tmux-orchestra · clicktest-8 reply`); unique titles are unchanged.
 - **A session resumed from the orphaned list in a new window now shows in
   the sidebar.** The window ran `sh -c 'claude --resume ID; exec $SHELL'`, so
   claude shared the wrapper's process group and tmux named the pane after the

@@ -267,7 +267,7 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	# the prompt while the agent works on it, the directory once the prompt or
 	# the empty-session marker took the activity row. The last notification
 	# is only a fallback (unread already shows as the dot).
-	if (resumable) meta = (f[27] != "") ? "❯ " f[27] : cwd_label(f[8])
+	if (resumable) meta = (f[27] != "") ? "❯ " f[27] : (orphan && f[28] != "") ? cwd_label(f[8]) " · " f[28] : cwd_label(f[8])
 	else if (meta == "" && f[27] != "" && !idle) meta = "❯ " f[27]
 	else if (meta == "" && (f[27] != "" || empty)) meta = cwd_label(f[8])
 	else if (meta == "") meta = f[13]
@@ -348,9 +348,10 @@ function orphan_separator(width) {
 # elsewhere" while the process still runs, "✓ done" for a completed background
 # session (seventh field 1, titled by its name when it ran in $HOME), and the
 # meta row is the directory.
-function orphan_block(rec, width, frame, nerd, wait_color, selected,    r, g, base) {
+# The title of orphan record rec: the directory name, or the session name for
+# a completed session that ran in $HOME.
+function orphan_title(rec,    r, base) {
 	split(rec, r, ";")
-	for (g = 1; g <= 27; g++) g_f[g] = ""
 	base = r[4]
 	sub(/\/+$/, "", base)
 	sub(/.*\//, "", base)
@@ -358,6 +359,15 @@ function orphan_block(rec, width, frame, nerd, wait_color, selected,    r, g, ba
 	# apart by its name, not the directory.
 	if (r[7] == "1" && ENVIRON["HOME"] != "" && r[4] == ENVIRON["HOME"] && r[5] != "") base = r[5]
 	if (base == "") base = (r[5] != "") ? r[5] : r[1]
+	return base
+}
+
+# dup is 1 when another orphan has the same title: the meta row then adds the
+# session name after the directory so the rows can be told apart.
+function orphan_block(rec, width, frame, nerd, wait_color, selected, dup,    r, g, base) {
+	split(rec, r, ";")
+	for (g = 1; g <= 28; g++) g_f[g] = ""
+	base = orphan_title(rec)
 	g_f[2] = "orphan:" r[1]
 	g_f[3] = base
 	g_f[4] = "0"
@@ -365,6 +375,7 @@ function orphan_block(rec, width, frame, nerd, wait_color, selected,    r, g, ba
 	g_f[8] = r[4]
 	g_f[20] = "3"
 	g_f[22] = r[3]
+	if (dup && r[5] != "") g_f[28] = r[5]
 	return window_block(g_f, width, frame, nerd, wait_color, selected)
 }
 
@@ -518,8 +529,11 @@ END {
 	if (no > 0) {
 		out = out orphan_separator(width)
 		for (i = 1; i <= no; i++) {
+			otitle[orphan_title(orph[i])]++
+		}
+		for (i = 1; i <= no; i++) {
 			split(orph[i], r, ";")
-			out = out orphan_block(orph[i], width, frame, nerd, wait_color, sel != "" && "orphan:" r[1] == sel)
+			out = out orphan_block(orph[i], width, frame, nerd, wait_color, sel != "" && "orphan:" r[1] == sel, otitle[orphan_title(orph[i])] > 1)
 		}
 	}
 	printf "%s", out
