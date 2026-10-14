@@ -1,0 +1,5 @@
+40|off|#d29922|dev|1800000000
+dev|@1|long|0|background|2 background: 30 minute build||||||||||||||1|1798200000
+dev|@2|stale|0|background|3 background? python3 - <<PYEOF||||||||||||||1|1799998500
+dev|@3|watch|0|background|1 background? live updates for artifact||||||||||||||1|1799900000
+dev|@4|odd|0|background|waiting on deploy||||||||||||||1|1799900000

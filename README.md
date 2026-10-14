@@ -44,6 +44,10 @@ with upstream, it:
 - gives **each agent state its own color**: working (orange), blocked on
   you (red), waiting on background agents or shells (blue), compacting
   (purple), stopped on an API error (yellow), finished unread (green)
+- **health-checks a `background` pane's work** (processes under Claude, task
+  output files): working stays `N background:` however long it runs, work
+  that stopped ends the pane ~10 minutes later, and work that cannot be
+  checked (an in-process watcher) shows a grey `N background? idle 25m`
 - redraws about **9x faster** (one tmux call and one awk pass per frame)
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, tmux.conf options being overwritten, and a

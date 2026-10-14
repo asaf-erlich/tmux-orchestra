@@ -221,7 +221,7 @@ function with_style(style, c, text,    s) {
 # glyph, no age and none of its (stale) agent state. f[20] is 3 for an
 # orphaned session (orphan_block): drawn like a resumable pane, but f[6] is its
 # activity row and its age, from f[22], is shown.
-function window_block(f, width, frame, nerd, wait_color, selected,    orphan, resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
+function window_block(f, width, frame, nerd, wait_color, selected,    orphan, resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done, bg_stale) {
 	orphan = (f[20] == "3")
 	resumable = (f[20] == "2" || orphan)
 	active = f[4]; state = resumable ? "" : f[5]
@@ -243,6 +243,12 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	idle = !live_state(state)
 	empty = (idle && !resumable && f[27] == "" && f[23] != "")
 	activity = orphan ? f[6] : resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
+	# The health check (orchestra-claude-hook reconcile) writes "N background?
+	# cmd" when it cannot tell whether the work still runs (an in-process
+	# watcher leaves no process or file): drawn grey with the idle time,
+	# "N background? idle 25m · cmd". Work seen running stays "N background: cmd".
+	bg_stale = (state == "background" && activity ~ /^[0-9]+ background\? /)
+	if (bg_stale && age_text(f[21]) != "") activity = substr(activity, 1, index(activity, "? ")) " idle " age_text(f[21]) " · " substr(activity, index(activity, "? ") + 2)
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
@@ -294,8 +300,8 @@ function window_block(f, width, frame, nerd, wait_color, selected,    orphan, re
 	if (active == "1" && needs_you) title_style = "bold_color"
 	else if (active == "1") title_style = "bold"
 	else if (needs_you) title_style = "color"
-	row_style = ((live_state(state) && state != "running") || empty || unread_done || resumable) ? "color" : ""
-	row_color = (empty || resumable) ? "#808080" : scolor
+	row_style = ((live_state(state) && state != "running") || bg_stale || empty || unread_done || resumable) ? "color" : ""
+	row_color = (empty || resumable || bg_stale) ? "#808080" : scolor
 
 	# Unread: a red dot replaces the second-to-last character of the top
 	# border, unless the title fills the row (the meta row still shows the

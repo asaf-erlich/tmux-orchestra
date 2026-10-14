@@ -1,0 +1,12 @@
+┌─ dev:long ─────────────────────── 2w ─
+│& 2 background: 30 minute build
+│ 
+┌─ dev:stale ───────────────────── 25m ─
+│& 3 background? idle 25m · python3 - …
+│ 
+┌─ dev:watch ────────────────────── 1d ─
+│& 1 background? idle 1d · live update…
+│ 
+┌─ dev:odd ──────────────────────── 1d ─
+│& waiting on deploy
+│ 

@@ -366,7 +366,7 @@ bg_opt() {
     tmux show-options -v -p -t "$window1_claude_pane" "$1" 2>/dev/null || printf ''
 }
 bg_session() {
-    printf '{"sessionId":"sess-bg","status":"%s","statusUpdatedAt":%s}\n' "$1" "$2" >"$TMP_DIR/claude/sessions/$claude_pid.json"
+    printf '{"pid":%s,"sessionId":"sess-bg","status":"%s","statusUpdatedAt":%s}\n' "$claude_pid" "$1" "$2" >"$TMP_DIR/claude/sessions/$claude_pid.json"
 }
 bg_note() {
     printf '{"type":"queue-operation","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n</task-notification>"}\n' "$1" "$2" >>"$bg_transcript"
@@ -392,6 +392,77 @@ assert_eq '' "$(bg_opt @ab_agent_state)" 'reconcile ends background once every r
 assert_eq '' "$(bg_opt @ab_bg_tasks)" 'finishing background work forgets the task ids'
 assert_eq '1' "$(bg_opt @ab_unread)" 'finished background work marks an unwatched window unread'
 tmux set-option -pq -t "$window1_claude_pane" @ab_unread ''
+# Health check of background work no notification will ever confirm: a fake
+# ps (one call per reconcile, counted) and a task output directory stand in
+# for the machine. Process alive -> stays background (blue) and @ab_bg_alive_at
+# moves up; all stopped -> ends only 10 minutes after it was last seen alive;
+# a task that leaves neither process nor file -> background?, never ends.
+mkdir -p "$TMP_DIR/bin" "$TMP_DIR/tasks/proj/sess-bg/tasks"
+cat >"$TMP_DIR/bin/ps" <<'PSEOF'
+#!/bin/sh
+case "$*" in
+    *ppid=,command=*) echo x >>"$PS_COUNT"; cat "$PS_FIXTURE" ;;
+    *) exec /bin/ps "$@" ;;
+esac
+PSEOF
+chmod +x "$TMP_DIR/bin/ps"
+PS_FIXTURE="$TMP_DIR/ps.out"
+PS_COUNT="$TMP_DIR/ps.count"
+export PS_FIXTURE PS_COUNT
+hreconcile() {
+    PATH="$TMP_DIR/bin:$PATH" ORCHESTRA_TASKS_ROOT="$TMP_DIR/tasks" CLAUDE_CONFIG_DIR="$TMP_DIR/claude" orchestra-claude-hook reconcile
+}
+ps_alive() {
+    printf '%s\n' "$claude_pid 1 claude" "$((claude_pid + 1)) $claude_pid node harness-mcp" \
+        "7001 $claude_pid /bin/zsh -c source snap && eval 'sleep 99' < /dev/null && pwd -P >| /private/tmp/claude-501/proj/sess-bg/tasks/hA.output" >"$PS_FIXTURE"
+}
+ps_none() {
+    printf '%s\n' "$claude_pid 1 claude" "$((claude_pid + 1)) $claude_pid node harness-mcp" >"$PS_FIXTURE"
+}
+bg_session idle $((now_ms - 3600000))
+bg_hook stop '{"background_tasks":[{"id":"hA","type":"local_bash","status":"running","description":"py"}]}'
+tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at 1000
+ps_alive
+: >"$PS_COUNT"
+hreconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'a running background shell keeps the pane in background'
+assert_eq '1 background: py' "$(bg_opt @ab_current_action)" 'a running background shell keeps the plain row'
+assert_eq '1' "$(wc -l <"$PS_COUNT" | tr -d ' ')" 'the health check runs ps once'
+case "$(bg_opt @ab_bg_alive_at)" in
+    ''|1000|*[!0-9]*) assert_eq 'recent epoch' "$(bg_opt @ab_bg_alive_at)" 'seeing the shell alive stamps @ab_bg_alive_at' ;;
+esac
+# No process, no output file: unknown. Marked, never ended, however old.
+ps_none
+tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at 1000
+hreconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'a task with no process or output file stays in background'
+assert_eq '1 background? py' "$(bg_opt @ab_current_action)" 'an unknown task reads background?'
+ps_alive
+hreconcile
+assert_eq '1 background: py' "$(bg_opt @ab_current_action)" 'seeing the work alive again drops the question mark'
+# An output file written long ago and no process: stopped. The pane ends only
+# once nothing has been seen alive for 10 minutes.
+printf 'x\n' >"$TMP_DIR/tasks/proj/sess-bg/tasks/hA.output"
+touch -t 202001010000 "$TMP_DIR/tasks/proj/sess-bg/tasks/hA.output"
+ps_none
+tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at "$(($(date +%s) - 100))"
+hreconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'stopped work seen alive 100s ago stays in background'
+tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at "$(($(date +%s) - 700))"
+hreconcile
+assert_eq '' "$(bg_opt @ab_agent_state)" 'stopped work not seen alive for 10 minutes ends the pane'
+assert_eq '' "$(bg_opt @ab_bg_tasks)$(bg_opt @ab_bg_alive_at)" 'ending forgets the task ids and the alive time'
+assert_eq '1' "$(bg_opt @ab_unread)" 'ended background work marks an unwatched pane unread'
+# A fresh output file counts as alive (an agent writing as it works).
+bg_hook stop '{"background_tasks":[{"id":"hA","type":"local_agent","status":"running","description":"agent"}]}'
+touch "$TMP_DIR/tasks/proj/sess-bg/tasks/hA.output"
+tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at 1000
+hreconcile
+assert_eq 'background' "$(bg_opt @ab_agent_state)" 'a task output file written just now keeps the pane in background'
+bg_hook stop '{}'
+orchestra clear-state --pane "$window1_claude_pane"
+tmux set-option -pq -t "$window1_claude_pane" @ab_unread ''
+\rm -f "$TMP_DIR/tasks/proj/sess-bg/tasks/hA.output"
 bg_hook stop '{"background_tasks":[{"id":"bgC","type":"local_bash","status":"running","description":"py"}]}'
 bg_hook prompt '{"prompt":"<task-notification> <task-id>bgC</task-id>"}'
 assert_eq '' "$(bg_opt @ab_bg_tasks)" 'a new turn forgets the recorded task ids'
