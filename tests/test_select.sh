@@ -153,8 +153,8 @@ check_click 10 ''
 check_click 11 'new-window -t $1: -c /tmp -n tmp claude --resume o1; exec'
 check_click 13 'claude --resume o1'
 check_click 14 'confirm-before -t /dev/ttys001 -p pid 99999999 still runs this session; kill it and resume? (y/n) run-shell -b '
-check_click 14 'orchestra-orphan-resume o2 $1'
-check_click 16 'orchestra-orphan-resume o2 $1'
+check_click 14 "orchestra-orphan-resume o2 '\\\$1'"
+check_click 16 "orchestra-orphan-resume o2 '\\\$1'"
 check_click 17 ''
 # A completed background session (seventh field 1) resumes at once, even
 # with a pid field of 0: no kill prompt. In $HOME the new window is named

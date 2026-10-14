@@ -380,7 +380,7 @@ select_orphan_open() {
 	fi
 	tmux confirm-before -t "$_sel_client" \
 		-p "pid $_sel_o_pid still runs this session; kill it and resume? (y/n)" \
-		"run-shell -b '${ORCHESTRA_LIB:-.}/../bin/orchestra-orphan-resume $1 $_sel_view_session'" >/dev/null 2>&1 || true
+		"run-shell -b \"${ORCHESTRA_LIB:-.}/../bin/orchestra-orphan-resume $1 '\\${_sel_view_session}'\"" >/dev/null 2>&1 || true
 }
 
 # Usage: select_orphan_resume ID
