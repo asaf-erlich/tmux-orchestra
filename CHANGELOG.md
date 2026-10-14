@@ -81,6 +81,10 @@ All of them are on the `fix-pane-exists` branch.
   unless you are looking). Limit: a task id with no recorded notification
   (a Stop payload without ids) is left alone.
 
+- **A completed background session leaves the orphaned list once resumed.**
+  It stays in `claude agents --all` for good, so after the resumed session
+  ended it showed up again. Resuming one from the sidebar now dismisses it
+  (as `x` does); a plain `claude --resume` by hand is unaffected.
 - **Orphaned sessions with the same title can be told apart.** When two rows
   of the orphaned section would carry the same title (the same directory), the
   meta row now shows the session name after the directory

@@ -289,6 +289,10 @@ wait_eq '--resume sessA
 --resume sessB
 --resume sessC
 --resume sessHome' "the \$HOME session is resumed" resume_log
+# A completed background session stays in `claude agents --all` after it is
+# resumed, so resuming one hides it (dismisses it); the others stay listed.
+wait_eq 'sessLive sessDead' 'resumed completed sessions leave the list' orphan_ids
+assert_eq 'sessA sessB sessC sessHome' "$(opt @orchestra_orphan_dismissed)" 'resumed completed sessions are remembered as dismissed'
 
 # ---- (7) live session: confirm-before ---------------------------------------
 # Enter asks first; n leaves the process alone.
@@ -315,19 +319,20 @@ assert_eq 1 "$(alive "$bystander_pid")" 'y kills only that pid'
 # ---- (5) x dismisses a row for good ------------------------------------------
 move_to sessDead
 tmux send-keys -t "$sidebar" -l x
-wait_eq 'sessA sessB sessC sessHome sessLive' 'x removes the row at once' orphan_ids
-assert_eq 'sessDead' "$(opt @orchestra_orphan_dismissed)" 'the id is remembered as dismissed'
+wait_eq 'sessLive' 'x removes the row at once' orphan_ids
+assert_eq 'sessA sessB sessC sessHome sessDead' "$(opt @orchestra_orphan_dismissed)" 'the id is remembered as dismissed'
 wait_refreshes 2
 case " $(orphan_ids) " in *' sessDead '*) assert_eq 'sessDead gone' "$(orphan_ids)" 'the dismissed row stays gone after a refresh' ;; esac
 assert_eq 0 "$(frame_has projE)" 'the dismissed row is not drawn'
 
 # ---- (6) the cap and the off switch -------------------------------------------
-# Resumed sessions now run in panes? No: those windows run the stub, which
-# exits at once, so the list still has the same sessions.
+# Forget the dismissals (resumed and x'd) to get the full list back.
+tmux set-option -gqu @orchestra_orphan_dismissed
+wait_eq 6 'clearing the dismissals brings every row back' orphan_count
 tmux set-option -gq @orchestra_orphans_max 2
 wait_eq 2 '@orchestra_orphans_max caps the list' orphan_count
 tmux set-option -gq @orchestra_orphans_max 10
-wait_eq 5 'raising the cap brings the rows back' orphan_count
+wait_eq 6 'raising the cap brings the rows back' orphan_count
 tmux set-option -gq @orchestra_orphans off
 wait_eq '' '@orchestra_orphans off clears the list' opt @orchestra_orphan_agents
 wait_eq 0 '@orchestra_orphans off hides the section' section_shown

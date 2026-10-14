@@ -425,6 +425,7 @@ EOF
 			select-window -t "$_sel_target" \; \
 			select-pane -t "$_sel_target" \; \
 			send-keys -t "$_sel_target" "$_sel_cmd" Enter >/dev/null 2>&1 || true
+		select_orphan_done_hide "$1"
 		return 0
 	fi
 	# A login shell with the command typed in, not `sh -c 'claude ...'`: claude
@@ -433,6 +434,18 @@ EOF
 	tmux set-option -gqu @orchestra_selected_window \; \
 		new-window -t "$_sel_view_session:" -c "$_sel_cwd" -n "$_sel_base" \; \
 		send-keys "claude --resume $1" Enter >/dev/null 2>&1 || true
+	select_orphan_done_hide "$1"
+}
+
+# Usage: select_orphan_done_hide ID
+# A completed background session stays in `claude agents --all` after it is
+# resumed (the resume is a new interactive session that continues it), so it
+# would be listed again once that session ends: dismiss it when it is resumed.
+# Other orphans leave the list on their own, because the pane that resumes
+# them holds their id (@ab_session_id).
+select_orphan_done_hide() {
+	[ "$_sel_o_done" = 1 ] || return 0
+	select_orphan_dismiss "$1"
 }
 
 # Usage: select_orphan_dismiss ID
