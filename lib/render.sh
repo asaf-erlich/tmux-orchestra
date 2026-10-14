@@ -218,16 +218,19 @@ function with_style(style, c, text,    s) {
 # @ab_session_source and f[27] the last prompt with any "|" it contained
 # rejoined. f[20] is 2 for a pane that runs no Claude but has a session to
 # resume (@ab_resume_id): it is drawn dim, "↺ resume" on the activity row, no
-# glyph, no age and none of its (stale) agent state.
-function window_block(f, width, frame, nerd, wait_color, selected,    resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
-	resumable = (f[20] == "2")
+# glyph, no age and none of its (stale) agent state. f[20] is 3 for an
+# orphaned session (orphan_block): drawn like a resumable pane, but f[6] is its
+# activity row and its age, from f[22], is shown.
+function window_block(f, width, frame, nerd, wait_color, selected,    orphan, resumable, active, state, title, pad, activity, glyph, gcolor, pill, ptext, meta, tl, h, v, bs, be, title_style, row_style, show_dot, before_dot, out, since, age, tail, idle, empty, row_color, scolor, needs_you, unread_done) {
+	orphan = (f[20] == "3")
+	resumable = (f[20] == "2" || orphan)
 	active = f[4]; state = resumable ? "" : f[5]
 
 	# How long ago the agent last finished (@ab_finished_at, falling back to
 	# the last output in the window), right-aligned in the top border. Hidden
 	# while running or compacting: the spinner says more.
 	age = ""
-	if (state != "running" && state != "compacting" && !resumable) {
+	if (state != "running" && state != "compacting" && (!resumable || orphan)) {
 		since = (f[21] != "") ? f[21] : f[22]
 		age = age_text(since)
 	}
@@ -239,7 +242,7 @@ function window_block(f, width, frame, nerd, wait_color, selected,    resumable,
 
 	idle = !live_state(state)
 	empty = (idle && !resumable && f[27] == "" && f[23] != "")
-	activity = resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
+	activity = orphan ? f[6] : resumable ? "↺ resume" : activity_text(state, f[6], f[8], f[9], f[27], f[23])
 	glyph = state_glyph(state, frame, nerd, f[17])
 	gcolor = spinner_color(f[17])
 	# Finished while you were elsewhere (unread): rows in the done color and,
@@ -264,7 +267,7 @@ function window_block(f, width, frame, nerd, wait_color, selected,    resumable,
 	# the prompt while the agent works on it, the directory once the prompt or
 	# the empty-session marker took the activity row. The last notification
 	# is only a fallback (unread already shows as the dot).
-	if (resumable) meta = (f[27] != "") ? "❯ " f[27] : cwd_label(f[8])
+	if (resumable) meta = (f[27] != "") ? "❯ " f[27] : (orphan && f[28] != "") ? cwd_label(f[8]) " · " f[28] : cwd_label(f[8])
 	else if (meta == "" && f[27] != "" && !idle) meta = "❯ " f[27]
 	else if (meta == "" && (f[27] != "" || empty)) meta = cwd_label(f[8])
 	else if (meta == "") meta = f[13]
@@ -328,6 +331,52 @@ function window_block(f, width, frame, nerd, wait_color, selected,    resumable,
 function bg_separator(width) {
 	if (width < 14) return with_style("color", "#808080", repeat("─", width)) EL "\n"
 	return with_style("color", "#808080", "── background " repeat("─", width - 14)) EL "\n"
+}
+
+# The one-line rule before the orphaned sessions. Counted by hand, like
+# bg_separator.
+function orphan_separator(width) {
+	if (width < 12) return with_style("color", "#808080", repeat("─", width)) EL "\n"
+	return with_style("color", "#808080", "── orphaned " repeat("─", width - 12)) EL "\n"
+}
+
+# One orphaned session (`claude agents` kind "interactive" that no tmux pane
+# runs, recorded by bin/orchestra-bg-refresh in @orchestra_orphan_agents) as a
+# window_block. rec is "id;pid;started_at;cwd;name;alive[;done]". The block id is
+# "orphan:<id>", which is also how the keyboard selection names it. The title
+# is the directory name; the activity row says "↺ resume", or "● pid N live
+# elsewhere" while the process still runs, "✓ done" for a completed background
+# session (seventh field 1, titled by its name when it ran in $HOME), and the
+# meta row is the directory.
+# The title of orphan record rec: the directory name, or the session name for
+# a completed session that ran in $HOME.
+function orphan_title(rec,    r, base) {
+	split(rec, r, ";")
+	base = r[4]
+	sub(/\/+$/, "", base)
+	sub(/.*\//, "", base)
+	# A completed background session (r[7] == 1) started in $HOME is told
+	# apart by its name, not the directory.
+	if (r[7] == "1" && ENVIRON["HOME"] != "" && r[4] == ENVIRON["HOME"] && r[5] != "") base = r[5]
+	if (base == "") base = (r[5] != "") ? r[5] : r[1]
+	return base
+}
+
+# dup is 1 when another orphan has the same title: the meta row then adds the
+# session name after the directory so the rows can be told apart.
+function orphan_block(rec, width, frame, nerd, wait_color, selected, dup,    r, g, base) {
+	split(rec, r, ";")
+	for (g = 1; g <= 28; g++) g_f[g] = ""
+	base = orphan_title(rec)
+	g_f[2] = "orphan:" r[1]
+	g_f[3] = base
+	g_f[4] = "0"
+	g_f[6] = (r[7] == "1") ? "✓ done" : (r[6] == "1") ? "● pid " r[2] " live elsewhere" : "↺ resume"
+	g_f[8] = r[4]
+	g_f[20] = "3"
+	g_f[22] = r[3]
+	if (dup && r[5] != "") g_f[28] = r[5]
+	return window_block(g_f, width, frame, nerd, wait_color, selected)
 }
 
 # One background session (`claude agents` kind "background", recorded by
@@ -398,6 +447,12 @@ mode == "frame" && $1 == "" && $2 == "bg" {
 	for (i = 3; i <= NF; i++) if ($i != "") { nb++; bg[nb] = $i }
 	next
 }
+# "|orphan|REC|...": @orchestra_orphan_agents, drawn after the background
+# sessions.
+mode == "frame" && $1 == "" && $2 == "orphan" {
+	for (i = 3; i <= NF; i++) if ($i != "") { no++; orph[no] = $i }
+	next
+}
 $2 == "" { next }
 mode != "frame" { n++; line[n] = $0; next }
 {
@@ -435,6 +490,10 @@ END {
 			split(bg[i], r, ";")
 			if ("bg:" r[1] == s) valid = 1
 		}
+		for (i = 1; i <= no; i++) {
+			split(orph[i], r, ";")
+			if ("orphan:" r[1] == s) valid = 1
+		}
 		# Show the selection while focused, falling back to the active pane
 		# (or the first listed one when the active window is not listed) when
 		# the stored id is unset or stale. Unfocused, show it only if it points
@@ -467,6 +526,16 @@ END {
 			out = out bg_block(bg[i], width, frame, nerd, wait_color, sel != "" && "bg:" r[1] == sel)
 		}
 	}
+	if (no > 0) {
+		out = out orphan_separator(width)
+		for (i = 1; i <= no; i++) {
+			otitle[orphan_title(orph[i])]++
+		}
+		for (i = 1; i <= no; i++) {
+			split(orph[i], r, ";")
+			out = out orphan_block(orph[i], width, frame, nerd, wait_color, sel != "" && "orphan:" r[1] == sel, otitle[orphan_title(orph[i])] > 1)
+		}
+	}
 	printf "%s", out
 }
 '
@@ -493,7 +562,9 @@ render_rows() {
 # itself contain "|") and renders one block per Claude pane, or a
 # placeholder line when there is none. A non-numeric WIDTH falls back to 32. An optional
 # "|bg|REC|..." line (@orchestra_bg_agents) adds a separator and one block per
-# background session after the windows.
+# background session after the windows, and a likewise optional
+# "|orphan|REC|..." line (@orchestra_orphan_agents) a separator and one block
+# per orphaned session after those.
 render_frame() {
 	_render_color=0
 	render_supports_color && _render_color=1

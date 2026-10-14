@@ -1,0 +1,29 @@
+┏━ dev:build ━━━━━━━━━━━━━━━━━━━━━━ 1m ━
+┃ 
+┃ 
+── background ──────────────────────────
+┌─ job ─────────────────────────── 16m ─
+│OK job
+│ bg a1
+── orphaned ────────────────────────────
+┌─ gmail ────────────────────────── 1h ─
+│ ● pid 98501 live elsewhere
+│ gmail
+┌─ claude-marketplace ───────────── 2h ─
+│ ↺ resume
+│ claude-marketplace
+┌─ root session ────────────────────────
+│ ↺ resume
+│ /
+┌─ old-proj ─────────────────────── 1d ─
+│ ✓ done
+│ old-proj
+┌─ debug iterm crash ────────────── 2d ─
+│ ✓ done
+│ me
+┌─ twin ─────────────────────────── 3d ─
+│ ✓ done
+│ twin · first twin
+┌─ twin ─────────────────────────── 4d ─
+│ ✓ done
+│ twin · second twin

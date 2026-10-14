@@ -1,0 +1,43 @@
+#!/bin/sh
+# Kill the process that still runs an orphaned session, then resume it.
+# Usage: orchestra-orphan-resume <session-id> <viewing-session-id>
+#
+# Run by tmux's confirm-before (select_orphan_open in lib/select.sh) once you
+# answered y; never on its own. The pid comes from @orchestra_orphan_agents,
+# which can be a few seconds old, so it is only signalled while it still is a
+# Claude process. If it does not exit within 5 seconds the resume is skipped.
+set -eu
+
+ORCHESTRA_LIB=$(CDPATH='' cd -- "$(dirname -- "$0")/../lib" && pwd)
+# shellcheck disable=SC1091
+. "$ORCHESTRA_LIB/select.sh"
+
+[ $# -eq 2 ] || { printf '%s\n' 'usage: orchestra-orphan-resume <session-id> <viewing-session-id>' >&2; exit 1; }
+
+_sel_orphan=$(tmux show-options -gqv @orchestra_orphan_agents 2>/dev/null) || exit 0
+_sel_view_session=$2
+_sel_client=''
+select_orphan_find "$1" || exit 0
+# shellcheck disable=SC2154 # _sel_o_pid is set by select_orphan_find.
+
+case "$_sel_o_pid" in '' | *[!0-9]*) ;; *)
+    if kill -0 "$_sel_o_pid" 2>/dev/null; then
+        case "$(ps -o command= -p "$_sel_o_pid" 2>/dev/null)" in
+            *claude* | *[0-9].[0-9]*.[0-9]*) ;;
+            *) tmux display-message "orchestra: pid $_sel_o_pid is no longer Claude; not killed" >/dev/null 2>&1 || true; exit 0 ;;
+        esac
+        kill "$_sel_o_pid" 2>/dev/null || true
+        _tries=0
+        while kill -0 "$_sel_o_pid" 2>/dev/null && [ "$_tries" -lt 20 ]; do
+            sleep 0.25
+            _tries=$((_tries + 1))
+        done
+        if kill -0 "$_sel_o_pid" 2>/dev/null; then
+            tmux display-message "orchestra: pid $_sel_o_pid did not exit; not resumed" >/dev/null 2>&1 || true
+            exit 0
+        fi
+    fi
+    ;;
+esac
+
+select_orphan_resume "$1"

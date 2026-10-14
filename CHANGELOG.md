@@ -22,6 +22,31 @@ All of them are on the `fix-pane-exists` branch.
   appending to ones already set. This is the one exception to "tmux options
   are the only state store".
 
+- **Orphaned sessions section.** Interactive Claude Code sessions that run in
+  no tmux pane (for instance left behind when tmux crashed before they were
+  saved) are listed under a `── orphaned ──` separator after the background
+  sessions, titled by directory, from the same `claude agents --json` refresh.
+  Enter or a click resumes one in the matching shell pane or a new window; one
+  whose process still runs asks before it is killed
+  (`bin/orchestra-orphan-resume`). `x` dismisses a row
+  (`@orchestra_orphan_dismissed`); `@orchestra_orphans off` hides the section.
+
+- **Completed background sessions in the orphaned section.** The refresh now
+  calls `claude agents --json --all` (still one call, off the tick) and lists
+  completed background sessions (no status; state done, failed or stopped) as
+  orphans too, so sessions from before a tmux crash are one Enter away. They
+  show dim with `✓ done`, titled by directory (by session name when it ran in
+  `$HOME`), and resume with `claude --resume <sessionId>` like other orphans,
+  without the kill prompt. Sessions a window is attached to, a pane holds, or
+  you dismissed are left out. The list is newest first, capped by the new
+  `@orchestra_orphans_max` (default 10).
+
+- **End-to-end test of the orphaned sessions** (`tests/test_orphans_e2e.sh`,
+  `make e2e`): a stub `claude` feeds canned `agents --json --all` output to the
+  real sidebar and refresh job on a private tmux server, and the test drives
+  Enter, `j`, `x`, clicks and the `y`/`n` confirmation, checking the frame and
+  what gets resumed.
+
 ### Changed
 
 - **The sidebar always sits at the left edge of its window, full height.**
@@ -55,6 +80,26 @@ All of them are on the `fix-pane-exists` branch.
   `<task-notification>` for every one of them (done, with the unread dot
   unless you are looking). Limit: a task id with no recorded notification
   (a Stop payload without ids) is left alone.
+
+- **A completed background session leaves the orphaned list once resumed.**
+  It stays in `claude agents --all` for good, so after the resumed session
+  ended it showed up again. Resuming one from the sidebar now dismisses it
+  (as `x` does); a plain `claude --resume` by hand is unaffected.
+- **Orphaned sessions with the same title can be told apart.** When two rows
+  of the orphaned section would carry the same title (the same directory), the
+  meta row now shows the session name after the directory
+  (`tmux-orchestra · clicktest-8 reply`); unique titles are unchanged.
+- **A session resumed from the orphaned list in a new window now shows in
+  the sidebar.** The window ran `sh -c 'claude --resume ID; exec $SHELL'`, so
+  claude shared the wrapper's process group and tmux named the pane after the
+  shell (`zsh`), which the Claude-pane filter skips. It is now a normal shell
+  window with `claude --resume ID` typed in, as the in-place resume does.
+- **Killing a live orphaned session and resuming it now resumes.** The `y`
+  answer of the confirmation ran `orchestra-orphan-resume` with the viewing
+  session id (`$0`, `$1`, ...) unquoted inside `run-shell`, so `sh` expanded it
+  to `sh`, no session was found and nothing was resumed after the process had
+  been killed. The id is now quoted. Found by `tests/test_orphans_e2e.sh`.
+
 - **A daemon-hosted Claude session no longer shows on the other panes of its
   window.** Hooks of a session the Claude daemon hosts (`claude --bg`, then
   `claude attach`) get no `$TMUX_PANE`, so they write window-scoped options,

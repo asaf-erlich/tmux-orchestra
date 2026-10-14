@@ -16,8 +16,10 @@ trap 'rm -f "$log"' EXIT
 # $attached. Every other call is appended to $log, one per line.
 dump=''
 attached=''
+orphan_panes=''
 tmux() {
 	case "$*" in
+		*'list-panes -s'*) printf '%s\n' "$orphan_panes" ;;
 		*list-panes*) printf '%s\n' "$dump" ;;
 		*list-windows*) printf '%s\n' "$attached" ;;
 		*) printf '%s\n' "$*" >>"$log" ;;
@@ -135,5 +137,86 @@ dump='$1|123|
 : >"$log"
 select_row '%9' 0
 case "$(cat "$log")" in *'send-keys'*) fail 'an id that is not a plain token is not typed' ;; esac
+
+# Orphaned sessions come after the background ones, each section a separator
+# line and 3 lines per record: two panes (lines 0-5), one background session
+# (6 separator, 7-9), two orphans (10 separator, 11-13 and 14-16). o1 is
+# dead; o2's process (pid 99999999) is alive and asks before it is killed.
+dump='$1|123|
+%1|1|1|$1|
+%2|3|1|$1|
+>100|/dev/ttys001
+|bg|a1;done;1799000000;/;first job
+|orphan|o1;111;1799000000;/tmp;n;0|o2;99999999;1799000100;/;m;1'
+check_click 7 'claude attach a1'
+check_click 10 ''
+check_click 11 'new-window -t $1: -c /tmp -n tmp ; send-keys claude --resume o1 Enter'
+check_click 13 'claude --resume o1'
+check_click 14 'confirm-before -t /dev/ttys001 -p pid 99999999 still runs this session; kill it and resume? (y/n) run-shell -b '
+check_click 14 "orchestra-orphan-resume o2 '\\\$1'"
+check_click 16 "orchestra-orphan-resume o2 '\\\$1'"
+check_click 17 ''
+# A completed background session (seventh field 1) resumes at once, even
+# with a pid field of 0: no kill prompt. In $HOME the new window is named
+# after the session.
+dump='$1|123|
+>100|/dev/ttys001
+|orphan|d1;0;1799000000;/tmp;job;0;1|d2;0;1799000100;'"$HOME"';my name;0;1'
+check_click 2 'new-window -t $1: -c /tmp -n tmp ; send-keys claude --resume d1 Enter'
+# ... and a completed session is dismissed once resumed (it stays in `claude agents --all`).
+check_click 2 '@orchestra_orphan_dismissed d1'
+check_click 5 "new-window -t \$1: -c $HOME -n my name ; send-keys claude --resume d2 Enter"
+# An id that is not a plain token is never put in a command.
+dump='$1|123|
+>100|/dev/ttys001
+|orphan|o$(x);111;1799000000;/tmp;n;0'
+check_click 2 ''
+
+# The target of a resume is the one shell pane (not the sidebar, not running
+# Claude) in the directory or in a window named after it; it gets the command
+# typed in, with a cd when it is elsewhere. Several candidates open a window.
+dump='$1|123|
+>100|/dev/ttys001
+|orphan|o1;111;1799000000;/tmp;n;0'
+orphan_panes='%7|0|1|0|/tmp|other
+%8|0|1|0|/home|elsewhere
+%9|1|1|0|/tmp|tmp
+%6|0|1|1|/tmp|tmp
+%5|0|0|0|/tmp|tmp'
+check_click 2 'select-window -t %7 ; select-pane -t %7 ; send-keys -t %7 claude --resume o1 Enter'
+orphan_panes='%8|0|1|0|/home|tmp'
+check_click 2 "send-keys -t %8 cd '/tmp' && claude --resume o1 Enter"
+orphan_panes='%7|0|1|0|/tmp|other
+%8|0|1|0|/home|tmp'
+check_click 2 'new-window -t $1: -c /tmp -n tmp'
+orphan_panes=''
+
+# Keyboard: the selection walks into the orphans and Enter resumes; "x"
+# (dismiss) hides one, on an orphan only. The id joins the dismissed list and
+# its record leaves the option at once.
+dump='$1|123|orphan:o1|old1
+%1|1|1|$1|
+>100|/dev/ttys001
+|orphan|o1;111;1799000000;/tmp;n;0|o2;112;1799000100;/x;m;0'
+: >"$log"
+select_move '%9' 0 enter
+case "$(cat "$log")" in *'claude --resume o1'*) ;; *) fail 'enter on an orphan' ;; esac
+: >"$log"
+select_move '%9' 0 dismiss
+case "$(cat "$log")" in *'@orchestra_orphan_agents o2;112;1799000100;/x;m;0'*'@orchestra_orphan_dismissed old1 o1'*) ;; *) fail 'dismiss an orphan' ;; esac
+dump='$1|123|o2x
+%1|1|1|$1|
+>100|/dev/ttys001
+|orphan|o2;112;1799000100;/x;m;0'
+: >"$log"
+select_move '%9' 0 dismiss
+case "$(cat "$log")" in *'orphan_dismissed'*) fail 'dismiss on a pane row does nothing' ;; esac
+dump='$1|123|orphan:o2
+%1|1|1|$1|
+>100|/dev/ttys001
+|orphan|o2;112;1799000100;/x;m;0'
+: >"$log"
+select_move '%9' 0 dismiss
+case "$(cat "$log")" in *'set-option -gqu @orchestra_orphan_agents ; set-option -gq @orchestra_orphan_dismissed o2'*) ;; *) fail 'dismissing the last orphan unsets the list' ;; esac
 
 printf 'test_select: ok\n'

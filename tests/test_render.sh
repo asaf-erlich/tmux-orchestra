@@ -159,6 +159,29 @@ check_background() {
 }
 check_background
 
+# Orphaned sessions (`claude agents` interactive sessions no pane runs,
+# "|orphan|REC|..." with "id;pid;started_at;cwd;name;alive[;done]"): a separator and
+# one block per record after the background sessions, titled by the
+# directory name, newest first as given; a live one says so on its activity
+# row. The keyboard selection can point at one ("orphan:<id>"). An empty
+# "|orphan|" line draws nothing.
+check_orphans() {
+    actual=$(HOME=/Users/me NO_COLOR=1 TERM=xterm render_frame 0 <"$REPO_DIR/tests/fixtures/render-orphans.input")
+    expected_text=$(cat "$REPO_DIR/tests/fixtures/render-orphans.expected")
+    if [ "$actual" != "$expected_text" ]; then
+        printf 'render_frame orphans mismatch\n--- expected ---\n%s\n--- actual ---\n%s\n' "$expected_text" "$actual" >&2
+        exit 1
+    fi
+    actual=$(printf '%s\n' '40|off||dev|1800000000' 'dev|@1|build|1||||||||||||||orphan:aa|0|1|||||||' '|orphan|aa;1;1799999940;/x/proj;n;0' | NO_COLOR=1 TERM=xterm render_frame 0 | sed -n '5p')
+    if [ "$actual" != '▌─ proj ─────────────────────────── 1m ─' ]; then
+        printf 'render_frame orphan selection mismatch\nactual: %s\n' "$actual" >&2
+        exit 1
+    fi
+    actual=$(printf '%s\n' '40|off||dev|1800000000' 'dev|@1|build|1|||||||||||||||0|1|||' '|orphan|' | NO_COLOR=1 TERM=xterm render_frame 0 | wc -l | tr -d ' ')
+    [ "$actual" = 3 ] || { printf 'render_frame empty orphans drew %s lines\n' "$actual" >&2; exit 1; }
+}
+check_orphans
+
 # Per-pane rows (fields 24-26: pane_id, pane_index, active flag): a window
 # with two Claude panes gets one block per pane, numbered .1, .2 by position
 # among its Claude panes, not by pane index (dev:web's panes have indexes 1

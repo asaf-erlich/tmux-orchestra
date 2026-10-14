@@ -18,6 +18,7 @@ bin/
   orchestra-select      Move/confirm the sidebar keyboard selection
   orchestra-claude-hook Claude Code hook dispatcher (JSON on stdin) + backfill
   orchestra-bg-refresh  Poll `claude agents --json` into @orchestra_bg_agents
+  orchestra-orphan-resume  Kill (after a confirmation) the process behind an orphaned session, then resume it
   orchestra-resurrect   save/restore the pane → Claude session map (tmux-resurrect hooks)
 lib/
   common.sh             Option CRUD, window resolution, shared helpers
@@ -34,6 +35,7 @@ tests/
   test_cli.sh           Integration tests (spins up isolated tmux server)
   test_render.sh        Fixture-based render regression tests
   test_select.sh        Click/selection mapping against a stub tmux function
+  test_orphans_e2e.sh   Orphaned-session list end to end (stub claude, real sidebar, private tmux server)
   fixtures/             Pipe-delimited input + .expected output pairs
 spec/
   implementation-spec.md  Authoritative design reference
@@ -82,6 +84,10 @@ All persistent state is stored as tmux user-options. Window-scoped unless noted,
 | `@orchestra_bg_agents` | orchestra-bg-refresh | — | Global: background Claude sessions, `id;state;started_at;cwd;name` records joined by `\|`; unset when none |
 | `@orchestra_bg_id` | window opened by `select_bg_open` | — | Window: the background session id this window runs `claude attach` for |
 | `@orchestra_state_file` | user | — | Global: path of the session-id file (default `${XDG_STATE_HOME:-~/.local/state}/tmux-orchestra/sessions`) |
+| `@orchestra_orphan_agents` | orchestra-bg-refresh | — | Global: orphaned Claude sessions (interactive, in no pane), `id;pid;started_at;cwd;name;alive[;done]` records joined by `\|` (a completed background session has pid 0 and `done` = 1), newest first, at most `@orchestra_orphans_max`; unset when none |
+| `@orchestra_orphan_dismissed` | sidebar `x` key, orchestra-bg-refresh | — | Global: dismissed orphan session ids, space separated; ids `claude agents` no longer lists are dropped |
+| `@orchestra_orphans` | user | — | Global: `off` hides orphaned sessions |
+| `@orchestra_orphans_max` | user | — | Global: most orphan rows (default 10) |
 | `@orchestra_background` | user | — | Global: `off` hides background sessions |
 | `@orchestra_bg_interval` | user / orchestra.tmux | — | Global: background refresh period in seconds (default 10, 0 disables); read when the renderer starts |
 
@@ -120,17 +126,20 @@ Exit codes: `0` success, `1` usage error, `2` not in tmux, `3` tmux call failed.
 - Animated glyphs (running: `⠋⠙⠹⠸`, waiting: `◐◓◑◒`, background: `◴◷◶◵`, compacting: `◜◝◞◟`) rotate via `FRAME_INDEX` incremented each tick. ASCII fallbacks exist for `TERM=dumb` or `NO_COLOR=1`.
 - Stuck states: rejecting a permission prompt or pressing Esc ends a turn with no hook. The same background job first runs `orchestra-claude-hook reconcile`, which clears running/waiting on each Claude pane (its own options, or its window's when it has none) whose `~/.claude/sessions/<pid>.json` has had `status: "idle"` for at least 3 seconds (`statusUpdatedAt`). It also ends a `background` pane in that idle state: Stop records the ids of the background tasks it counted in `@ab_bg_tasks`, and once the session transcript (`<sessionId>.jsonl` under `~/.claude/projects`) holds a finished `<task-notification>` (`completed`/`failed`/`killed`/`stopped`) as the latest for every id, reconcile sets `done` and clears the state. A new prompt or a Stop with nothing running clears the ids.
 - Background sessions: `claude agents --json` starts a node process, so it never runs on the tick. `orchestra-render` starts `orchestra-bg-refresh` as a background job every `@orchestra_bg_interval` seconds (one at a time); it writes `@orchestra_bg_agents` only when the list changed and then sends SIGUSR1. The tick reads the option as a last `|bg|REC|...` line of the same tmux call. `render_frame` draws a one-line `── background ──` separator and one 3-line `bg_block` per session after the windows (after the one-line placeholder when there are none); `select_row` uses the same geometry, and `select_go` on a `bg:<id>` pick calls `select_bg_open`, which selects the window tagged `@orchestra_bg_id=<id>` or opens a new one running `claude attach <id>`.
+- Orphaned sessions: the same background job (`orchestra-bg-refresh`, one `claude agents --json --all` call) also writes `@orchestra_orphan_agents`: completed background sessions (`kind: "background"`, no `status`, `state` done/failed/stopped, not attached via `@orchestra_bg_id`, not in the background section, which keeps only the running ones; record field 7 = 1, resumed by `claude --resume <sessionId>`, never alive, `✓ done` instead of `↺ resume`, titled by the name when cwd is `$HOME`) plus the `kind: "interactive"` sessions whose pid is not a pane's process or a descendant of one (one `ps -axo pid=,ppid=` call; if `ps` yields nothing the list is left alone) and whose id is no pane's `@ab_session_id` or `@ab_resume_id` and not in `@orchestra_orphan_dismissed`. The tick reads it as a further `|orphan|REC|...` line of the same tmux call; `render_frame` draws a `── orphaned ──` separator and one 3-line `orphan_block` (a `window_block` with field 20 = 3: dim, `↺ resume`, `✓ done` or `● pid N live elsewhere`, age from the start), whose meta row adds ` · <session name>` after the directory when another orphan has the same title (`orphan_title`; field 28) per session after the background ones; `select_row` counts both sections. A pick `orphan:<id>` calls `select_orphan_open`: a dead one goes straight to `select_orphan_resume` (the one shell pane in the session's directory or in a window named after it, else a new window), a live one asks via `confirm-before` and then `bin/orchestra-orphan-resume` kills the pid (only while it still is Claude) and resumes. The `x` key (`select_move ... dismiss`) hides an orphan.
 - Resumable panes: `ORCHESTRA_CLAUDE_PANE` is 1 for a Claude pane, 2 for a pane that runs none but has `@ab_resume_id`, else 0 (field 20 of the dump; `backfill` and `reconcile` act only on 1). `window_block` draws a 2 dim with `↺ resume` on the activity row and the last prompt (else the directory) below, with no glyph, age, unread dot or stale state. `select_windows` carries the id as a 4th field of `_sel_windows`; `select_go` on such a pick types `claude --resume <id>` into the pane (second tmux call) and unsets `@ab_resume_id`.
 - Nerd Font glyphs are gated on `@orchestra_nerd_fonts on|off` (no auto-detection).
 
 ## Testing
 
 ```sh
-make test          # shellcheck + test_cli.sh + test_render.sh
+make test          # shellcheck + test_cli.sh + test_render.sh + test_select.sh + test_orphans_e2e.sh
 make shellcheck    # shellcheck only
+make e2e           # tests/test_orphans_e2e.sh alone (about 20 s; needs jq and script(1))
 ```
 
 - `tests/test_cli.sh` spins up a detached tmux server on a private socket (`-L <socket>`), exercises every CLI subcommand, and asserts option values are written correctly. Always clean up the server with `tmux -L <socket> kill-server` at the end.
+- `tests/test_orphans_e2e.sh` runs the real sidebar and refresh job on a private tmux server against a stub `claude` (canned `agents --json --all`, `--resume` argv recorded), drives keys/clicks/`confirm-before`, and asserts the frame and what gets resumed. Run it with stdin from `/dev/null` and never under `timeout` (the headless client would be stopped on the tty).
 - `tests/test_render.sh` sources [lib/render.sh](lib/render.sh), feeds fixture data, and diffs stdout against [tests/fixtures/](tests/fixtures/) `.expected` files.
 - **When adding a feature, add a corresponding test.** For rendering changes, add or update `.expected` fixture files.
 
