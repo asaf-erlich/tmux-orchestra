@@ -41,6 +41,12 @@ All of them are on the `fix-pane-exists` branch.
   you dismissed are left out. The list is newest first, capped by the new
   `@orchestra_orphans_max` (default 10).
 
+- **End-to-end test of the orphaned sessions** (`tests/test_orphans_e2e.sh`,
+  `make e2e`): a stub `claude` feeds canned `agents --json --all` output to the
+  real sidebar and refresh job on a private tmux server, and the test drives
+  Enter, `j`, `x`, clicks and the `y`/`n` confirmation, checking the frame and
+  what gets resumed.
+
 ### Changed
 
 - **The sidebar always sits at the left edge of its window, full height.**
@@ -74,6 +80,13 @@ All of them are on the `fix-pane-exists` branch.
   `<task-notification>` for every one of them (done, with the unread dot
   unless you are looking). Limit: a task id with no recorded notification
   (a Stop payload without ids) is left alone.
+
+- **Killing a live orphaned session and resuming it now resumes.** The `y`
+  answer of the confirmation ran `orchestra-orphan-resume` with the viewing
+  session id (`$0`, `$1`, ...) unquoted inside `run-shell`, so `sh` expanded it
+  to `sh`, no session was found and nothing was resumed after the process had
+  been killed. The id is now quoted. Found by `tests/test_orphans_e2e.sh`.
+
 - **A daemon-hosted Claude session no longer shows on the other panes of its
   window.** Hooks of a session the Claude daemon hosts (`claude --bg`, then
   `claude attach`) get no `$TMUX_PANE`, so they write window-scoped options,
