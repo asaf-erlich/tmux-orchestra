@@ -427,9 +427,12 @@ EOF
 			send-keys -t "$_sel_target" "$_sel_cmd" Enter >/dev/null 2>&1 || true
 		return 0
 	fi
+	# A login shell with the command typed in, not `sh -c 'claude ...'`: claude
+	# then has its own process group, so tmux reports the pane as claude (a
+	# `sh -c` wrapper names the pane after the shell and the sidebar drops it).
 	tmux set-option -gqu @orchestra_selected_window \; \
-		new-window -t "$_sel_view_session:" -c "$_sel_cwd" -n "$_sel_base" \
-		"claude --resume $1; exec \"\${SHELL:-sh}\"" >/dev/null 2>&1 || true
+		new-window -t "$_sel_view_session:" -c "$_sel_cwd" -n "$_sel_base" \; \
+		send-keys "claude --resume $1" Enter >/dev/null 2>&1 || true
 }
 
 # Usage: select_orphan_dismiss ID

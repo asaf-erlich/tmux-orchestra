@@ -81,6 +81,11 @@ All of them are on the `fix-pane-exists` branch.
   unless you are looking). Limit: a task id with no recorded notification
   (a Stop payload without ids) is left alone.
 
+- **A session resumed from the orphaned list in a new window now shows in
+  the sidebar.** The window ran `sh -c 'claude --resume ID; exec $SHELL'`, so
+  claude shared the wrapper's process group and tmux named the pane after the
+  shell (`zsh`), which the Claude-pane filter skips. It is now a normal shell
+  window with `claude --resume ID` typed in, as the in-place resume does.
 - **Killing a live orphaned session and resuming it now resumes.** The `y`
   answer of the confirmation ran `orchestra-orphan-resume` with the viewing
   session id (`$0`, `$1`, ...) unquoted inside `run-shell`, so `sh` expanded it

@@ -150,7 +150,7 @@ dump='$1|123|
 |orphan|o1;111;1799000000;/tmp;n;0|o2;99999999;1799000100;/;m;1'
 check_click 7 'claude attach a1'
 check_click 10 ''
-check_click 11 'new-window -t $1: -c /tmp -n tmp claude --resume o1; exec'
+check_click 11 'new-window -t $1: -c /tmp -n tmp ; send-keys claude --resume o1 Enter'
 check_click 13 'claude --resume o1'
 check_click 14 'confirm-before -t /dev/ttys001 -p pid 99999999 still runs this session; kill it and resume? (y/n) run-shell -b '
 check_click 14 "orchestra-orphan-resume o2 '\\\$1'"
@@ -162,8 +162,8 @@ check_click 17 ''
 dump='$1|123|
 >100|/dev/ttys001
 |orphan|d1;0;1799000000;/tmp;job;0;1|d2;0;1799000100;'"$HOME"';my name;0;1'
-check_click 2 'new-window -t $1: -c /tmp -n tmp claude --resume d1; exec'
-check_click 5 "new-window -t \$1: -c $HOME -n my name claude --resume d2; exec"
+check_click 2 'new-window -t $1: -c /tmp -n tmp ; send-keys claude --resume d1 Enter'
+check_click 5 "new-window -t \$1: -c $HOME -n my name ; send-keys claude --resume d2 Enter"
 # An id that is not a plain token is never put in a command.
 dump='$1|123|
 >100|/dev/ttys001
