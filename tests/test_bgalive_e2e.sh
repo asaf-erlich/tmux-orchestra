@@ -51,11 +51,17 @@ cat >"$TMP_DIR/bin/tmux" <<EOF
 #!/bin/sh
 exec $(command -v tmux) -L "$SOCKET" "\$@"
 EOF
-# A counting pass-through: the real ps still runs.
+# A counting pass-through: the real ps still runs. While $TMP_DIR/ps-etime
+# exists, its content replaces the etime column of the health check's call, so
+# the test controls how old the real child looks.
 REAL_PS=$(command -v ps)
 cat >"$TMP_DIR/bin/ps" <<EOF
 #!/bin/sh
 printf x >>"$TMP_DIR/ps-calls"
+E=\$(cat "$TMP_DIR/ps-etime" 2>/dev/null)
+case "\$*" in
+    *etime=*) [ -n "\$E" ] && { $REAL_PS "\$@" | sed -E "s/^( *[0-9]+ +[0-9]+ +)[^ ]+/\1\$E/"; exit 0; } ;;
+esac
 exec $REAL_PS "\$@"
 EOF
 chmod +x "$TMP_DIR/bin/tmux" "$TMP_DIR/bin/ps"
@@ -254,6 +260,30 @@ assert_eq background "$(state_of fresh)" 'a fresh output file keeps the pane bac
 assert_eq background "$(state_of unknown)" 'unknown work does not end past the grace'
 assert_eq '1 background? watch live updates' "$(action_of unknown)" 'unknown stays marked'
 
+# ---- (h) the age of the oldest running process ------------------------------------------
+# Nothing under 10 minutes, then the age in the sidebar's style; work with no
+# process (an output file only) never shows one.
+set_etime() { printf '%s\n' "$1" >"$TMP_DIR/ps-etime"; }
+set_etime 09:59
+reconcile
+assert_eq '1 background: sleep 900' "$(action_of alive)" 'a process 9m59s old keeps the plain row'
+set_etime 10:00
+reconcile
+assert_eq '1 background · 10m: sleep 900' "$(action_of alive)" 'a process 10 minutes old shows its age'
+assert_eq '1 background: sleep 900' "$(action_of fresh)" 'output-file-only work has no process age'
+set_etime 3:25:00
+reconcile
+assert_eq '1 background · 3h: sleep 900' "$(action_of alive)" 'hours read as 3h'
+set_etime 2-03:04:05
+reconcile
+assert_eq '1 background · 2d: sleep 900' "$(action_of alive)" 'days read as 2d'
+set_etime 20-00:00:01
+reconcile
+assert_eq '1 background · 2w: sleep 900' "$(action_of alive)" 'weeks read as 2w'
+rm -f "$TMP_DIR/ps-etime"
+reconcile
+assert_eq '1 background: sleep 900' "$(action_of alive)" 'a young process drops the age again'
+
 # ---- the real sidebar: its refresh job runs the same check -------------------------
 tmux set-option -gq @orchestra_bg_interval 1
 TMUX_PANE=$(cat "$TMP_DIR/focus.pane") orchestra-toggle
@@ -277,12 +307,21 @@ if [ -z "$live_color" ] || [ "$live_color" = "$unknown_color" ]; then
     assert_eq 'a colour other than grey' "$live_color" 'live work is not drawn grey'
 fi
 
+# ---- (h) the sidebar draws the age, and drops it when the child is killed --------------
+set_etime 2-03:04:05
+aged_row_shows() { row_of alive | grep -qF '1 background · 2d:' && printf 1; }
+wait_eq 1 'the sidebar draws "N background · 2d: cmd" for old work' aged_row_shows
+assert_eq 0 "$(row_of alive | grep -cF 'background?')" 'aged live work is not marked unknown'
+
 # ---- (c) kill the real child: the pane ends once the grace has passed ----------------
 child_pid=$(cat "$TMP_DIR/alive.child")
 for kid in $(pgrep -P "$child_pid"); do kill "$kid"; done
 kill "$child_pid"
 wait_eq 0 'the child shell is gone' sh -c "kill -0 $child_pid 2>/dev/null && echo 1 || echo 0"
 last_stamp=$(alive_at_of alive)
+aged_row_gone() { row_of alive | grep -qF ' · 2d:' && printf 0 || printf 1; }
+wait_eq 1 'the age disappears from the row once the child is gone' aged_row_gone
+assert_eq '1 background: sleep 900' "$(action_of alive)" 'the action is plain again once the child is gone'
 sleep 2
 assert_eq background "$(state_of alive)" 'killed work is still background before the grace passes'
 wait_eq '' 'killed work ends once the grace has passed' state_of alive
