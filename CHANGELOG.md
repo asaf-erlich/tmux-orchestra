@@ -9,6 +9,14 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Added
 
+- **Background rows show how long the work has run.** The health check's one
+  `ps` now also reads `etime`; when the oldest running `sh -c` / task process
+  under Claude is at least 10 minutes old (`ORCHESTRA_BG_AGE_MIN`), the row
+  reads `N background · 2d: <cmd>` (same `5m`/`3h`/`2d`/`6w` style as the
+  finish age) instead of `N background: <cmd>`, so a hung shell is not
+  mistaken for a fresh build. Work known only from a task output file has no
+  process age and keeps the plain row; the grey `background?` marker is
+  unchanged.
 - **Resume Claude sessions after a tmux crash.** The Claude Code hook now
   records each pane's session id (`@ab_session_id`). New
   `bin/orchestra-resurrect` saves the pane → session map to a state file

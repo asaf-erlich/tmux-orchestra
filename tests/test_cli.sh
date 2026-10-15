@@ -401,7 +401,7 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/tasks/proj/sess-bg/tasks"
 cat >"$TMP_DIR/bin/ps" <<'PSEOF'
 #!/bin/sh
 case "$*" in
-    *ppid=,command=*) echo x >>"$PS_COUNT"; cat "$PS_FIXTURE" ;;
+    *ppid=,etime=,command=*) echo x >>"$PS_COUNT"; cat "$PS_FIXTURE" ;;
     *) exec /bin/ps "$@" ;;
 esac
 PSEOF
@@ -413,11 +413,11 @@ hreconcile() {
     PATH="$TMP_DIR/bin:$PATH" ORCHESTRA_TASKS_ROOT="$TMP_DIR/tasks" CLAUDE_CONFIG_DIR="$TMP_DIR/claude" orchestra-claude-hook reconcile
 }
 ps_alive() {
-    printf '%s\n' "$claude_pid 1 claude" "$((claude_pid + 1)) $claude_pid node harness-mcp" \
-        "7001 $claude_pid /bin/zsh -c source snap && eval 'sleep 99' < /dev/null && pwd -P >| /private/tmp/claude-501/proj/sess-bg/tasks/hA.output" >"$PS_FIXTURE"
+    printf '%s\n' "$claude_pid 1 05:00 claude" "$((claude_pid + 1)) $claude_pid 05:00 node harness-mcp" \
+        "7001 $claude_pid ${PS_ETIME:-00:05} /bin/zsh -c source snap && eval 'sleep 99' < /dev/null && pwd -P >| /private/tmp/claude-501/proj/sess-bg/tasks/hA.output" >"$PS_FIXTURE"
 }
 ps_none() {
-    printf '%s\n' "$claude_pid 1 claude" "$((claude_pid + 1)) $claude_pid node harness-mcp" >"$PS_FIXTURE"
+    printf '%s\n' "$claude_pid 1 05:00 claude" "$((claude_pid + 1)) $claude_pid 05:00 node harness-mcp" >"$PS_FIXTURE"
 }
 bg_session idle $((now_ms - 3600000))
 bg_hook stop '{"background_tasks":[{"id":"hA","type":"local_bash","status":"running","description":"py"}]}'
@@ -431,6 +431,25 @@ assert_eq '1' "$(wc -l <"$PS_COUNT" | tr -d ' ')" 'the health check runs ps once
 case "$(bg_opt @ab_bg_alive_at)" in
     ''|1000|*[!0-9]*) assert_eq 'recent epoch' "$(bg_opt @ab_bg_alive_at)" 'seeing the shell alive stamps @ab_bg_alive_at' ;;
 esac
+# The oldest running process's age (etime: [[dd-]hh:]mm:ss) shows from 10
+# minutes on, in the render's age style; the oldest of several counts; the
+# unknown marker and the plain row take it away again.
+PS_ETIME=09:59 ps_alive
+hreconcile
+assert_eq '1 background: py' "$(bg_opt @ab_current_action)" 'a shell 9m59s old keeps the plain row'
+PS_ETIME=10:00 ps_alive
+hreconcile
+assert_eq '1 background · 10m: py' "$(bg_opt @ab_current_action)" 'a shell 10 minutes old shows its age'
+PS_ETIME=1-00:00:00 ps_alive
+printf '%s\n' "7002 $claude_pid 3-02:00:00 sh -c sleep 1" >>"$PS_FIXTURE"
+hreconcile
+assert_eq '1 background · 3d: py' "$(bg_opt @ab_current_action)" 'the oldest of several shells counts, in days'
+ps_none
+hreconcile
+assert_eq '1 background? py' "$(bg_opt @ab_current_action)" 'no process drops the age for the unknown marker'
+PS_ETIME=00:05 ps_alive
+hreconcile
+assert_eq '1 background: py' "$(bg_opt @ab_current_action)" 'a young shell is plain again'
 # No process, no output file: unknown. Marked, never ended, however old.
 ps_none
 tmux set-option -pq -t "$window1_claude_pane" @ab_bg_alive_at 1000

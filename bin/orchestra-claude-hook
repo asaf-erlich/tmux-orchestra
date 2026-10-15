@@ -324,39 +324,80 @@ bg_end() {
 # under which a task output file still counts as being written.
 BG_GRACE=${ORCHESTRA_BG_GRACE:-600}
 BG_FRESH=${ORCHESTRA_BG_FRESH:-120}
+# Age of the oldest running process from which the row shows it.
+BG_AGE_MIN=${ORCHESTRA_BG_AGE_MIN:-600}
 TASKS_ROOT=${ORCHESTRA_TASKS_ROOT:-/private/tmp/claude-$(id -u)}
 
 # Usage: bg_procs_alive CLAUDE_PID IDS
-# True when a descendant of claude in $PS_SNAPSHOT ("pid ppid command" lines,
-# one `ps` for every pane) runs background work: a shell command (a
+# $PS_SNAPSHOT is "pid ppid etime command" lines, one `ps` for every pane.
+# When a descendant of claude runs background work (a shell command: a
 # background shell, an agent's tool call, a foreground build all run as
-# `sh -c` children) or anything naming a recorded task's output file. Claude's
-# own helpers (MCP servers, caffeinate) do not count.
+# `sh -c` children; or anything naming a recorded task's output file), prints
+# the elapsed seconds of the oldest such process and succeeds; prints nothing
+# and fails when none does. Claude's own helpers (MCP servers, caffeinate) do
+# not count.
 bg_procs_alive() {
     printf '%s\n' "$PS_SNAPSHOT" | awk -v root="$1" -v ids="$2" '
-        { par[$1] = $2; c = $0; sub(/^ *[0-9]+ +[0-9]+ */, "", c); cmd[$1] = c }
+        # etime is [[dd-]hh:]mm:ss.
+        function secs(e,    d, i, n, p) {
+            d = 0
+            if ((i = index(e, "-")) > 0) { d = substr(e, 1, i - 1) + 0; e = substr(e, i + 1) }
+            n = split(e, p, ":")
+            if (n < 2) return 0
+            return d * 86400 + p[n] + p[n - 1] * 60 + (n >= 3 ? p[n - 2] * 3600 : 0)
+        }
+        { par[$1] = $2; et[$1] = $3; c = $0; sub(/^ *[0-9]+ +[0-9]+ +[^ ]+ */, "", c); cmd[$1] = c }
         END {
             n = split(ids, want, " ")
+            best = -1
             for (p in par) {
                 q = p
                 for (d = 0; d < 8 && q != "" && q != root; d++) q = par[q]
                 if (q != root || p == root) continue
-                if (cmd[p] ~ /^(\/usr\/bin\/|\/bin\/)?(zsh|bash|sh) -c /) exit 0
-                for (i = 1; i <= n; i++) if (index(cmd[p], "/" want[i] ".output")) exit 0
+                hit = (cmd[p] ~ /^(\/usr\/bin\/|\/bin\/)?(zsh|bash|sh) -c /)
+                for (i = 1; i <= n && !hit; i++) if (index(cmd[p], "/" want[i] ".output")) hit = 1
+                if (!hit) continue
+                s = secs(et[p])
+                if (s > best) best = s
             }
-            exit 1
+            if (best < 0) exit 1
+            print best
         }'
 }
 
-# Usage: bg_mark TARGET on|off
-# "N background: cmd" reads "N background? cmd" while the work's health cannot
-# be told (the sidebar greys it).
-bg_mark() {
+# Usage: bg_age_text SECONDS
+# Same style as age_text in lib/render.sh: now, 5m, 3h, 2d, 6w.
+bg_age_text() {
+    if [ "$1" -lt 60 ]; then printf 'now'
+    elif [ "$1" -lt 3600 ]; then printf '%sm' $(($1 / 60))
+    elif [ "$1" -lt 86400 ]; then printf '%sh' $(($1 / 3600))
+    elif [ "$1" -lt 1209600 ]; then printf '%sd' $(($1 / 86400))
+    else printf '%sw' $(($1 / 604800))
+    fi
+}
+
+# Usage: bg_label TARGET on|off [AGE]
+# Rewrites the pane's "N background: cmd" action. "on" reads "N background?
+# cmd" while the work's health cannot be told (the sidebar greys it); "off"
+# reads "N background: cmd", or "N background · 2d: cmd" with an AGE (how long
+# the oldest running process has run, given only once it is worth noticing).
+bg_label() {
     act=$(get_opt "$1" '@ab_current_action')
-    case "$2:$act" in
-        on:[0-9]*' background: '*) set_opt "$1" '@ab_current_action' "${act%% background: *} background? ${act#* background: }" ;;
-        off:[0-9]*' background? '*) set_opt "$1" '@ab_current_action' "${act%% background? *} background: ${act#* background? }" ;;
+    case "$act" in
+        [0-9]*' background: '*) cmd=${act#*' background: '} ;;
+        [0-9]*' background · '*': '*) cmd=${act#*': '} ;;
+        [0-9]*' background? '*) cmd=${act#*' background? '} ;;
+        *) return 0 ;;
     esac
+    n=${act%% *}
+    if [ "$2" = on ]; then
+        new="$n background? $cmd"
+    elif [ -n "${3-}" ]; then
+        new="$n background · $3: $cmd"
+    else
+        new="$n background: $cmd"
+    fi
+    [ "$new" = "$act" ] || set_opt "$1" '@ab_current_action' "$new"
 }
 
 # Usage: bg_check TARGET SCOPE SESSION_FILE SESSION_ID IDS IDLE_SINCE_MS
@@ -370,9 +411,18 @@ bg_check() {
     now_s=$((now_ms / 1000))
     alive=''
     unknown=''
+    age=''
     pid=$(jq -r '.pid // empty' "$3" 2>/dev/null)
-    if [ -n "$pid" ] && bg_procs_alive "$pid" "$5"; then
-        alive=1
+    if [ -n "$pid" ]; then
+        oldest=$(bg_procs_alive "$pid" "$5")
+        case "$oldest" in
+            ''|*[!0-9]*) ;;
+            *)
+                alive=1
+                # Long-running work is worth a second look; a fresh task is not.
+                [ "$oldest" -lt "$BG_AGE_MIN" ] || age=$(bg_age_text "$oldest")
+                ;;
+        esac
     fi
     for id in $5; do
         out=''
@@ -389,10 +439,11 @@ bg_check() {
     done
     if [ -n "$alive" ]; then
         set_opt "$1" '@ab_bg_alive_at' "$now_s"
-        bg_mark "$1" off
+        bg_label "$1" off "$age"
     elif [ -n "$unknown" ]; then
-        bg_mark "$1" on
+        bg_label "$1" on
     else
+        bg_label "$1" off
         seen=$(get_opt "$1" '@ab_bg_alive_at')
         case "$seen" in ''|*[!0-9]*) seen=$(($6 / 1000)) ;; esac
         [ $((now_s - seen)) -ge "$BG_GRACE" ] && bg_end "$1" "$2"
@@ -474,7 +525,7 @@ reconcile() {
     # One ps serves every background pane's health check; none without one.
     PS_SNAPSHOT=''
     case "$panes" in
-        *'|background'*) PS_SNAPSHOT=$(ps -axo pid=,ppid=,command= 2>/dev/null) ;;
+        *'|background'*) PS_SNAPSHOT=$(ps -axo pid=,ppid=,etime=,command= 2>/dev/null) ;;
     esac
     printf '%s\n' "$panes" |
     while IFS='|' read -r pane window pane_pid is_claude state; do

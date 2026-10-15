@@ -45,7 +45,8 @@ with upstream, it:
   you (red), waiting on background agents or shells (blue), compacting
   (purple), stopped on an API error (yellow), finished unread (green)
 - **health-checks a `background` pane's work** (processes under Claude, task
-  output files): working stays `N background:` however long it runs, work
+  output files): working stays `N background:` (`N background · 2d:` once
+  the oldest running process is 10 minutes old, so a hung shell stands out), work
   that stopped ends the pane ~10 minutes later, and work that cannot be
   checked (an in-process watcher) shows a grey `N background? idle 25m`
 - redraws about **9x faster** (one tmux call and one awk pass per frame)
