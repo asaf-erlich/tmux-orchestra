@@ -49,6 +49,9 @@ with upstream, it:
   the oldest running process is 10 minutes old, so a hung shell stands out), work
   that stopped ends the pane ~10 minutes later, and work that cannot be
   checked (an in-process watcher) shows a grey `N background? idle 25m`
+- ships **herdr hooks** (`hooks/herdr/`) that show the same cleared/last-prompt/
+  finish-age/background/compacting/error markers in herdr's sidebar; see
+  [hooks/herdr/README.md](hooks/herdr/README.md)
 - redraws about **9x faster** (one tmux call and one awk pass per frame)
 - fixes a **focus loop** that could crash the terminal, a sidebar that got
   stuck after its pane closed, tmux.conf options being overwritten, and a

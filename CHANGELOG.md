@@ -9,6 +9,13 @@ All of them are on the `fix-pane-exists` branch.
 
 ### Added
 
+- **herdr hooks.** `hooks/herdr/claude-session-meta.sh` reports the cleared /
+  empty-session marker, last prompt, finish age and background / compacting /
+  error state to [herdr](https://github.com/ogulcancelik/herdr) as pane
+  metadata tokens, and `age-ticker.sh` keeps the age current. Display only;
+  herdr keeps owning agent state. `hooks/herdr/README.md` documents the hooks,
+  the matching `config.toml` and `~/.zshrc` setup, and parity with the tmux
+  sidebar.
 - **Background rows show how long the work has run.** The health check's one
   `ps` now also reads `etime`; when the oldest running `sh -c` / task process
   under Claude is at least 10 minutes old (`ORCHESTRA_BG_AGE_MIN`), the row
